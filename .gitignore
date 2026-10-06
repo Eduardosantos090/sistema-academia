@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.storage/
+*.log
+coverage/
+test-results/
+playwright-report/
+e2e/.auth/
+.netlify-runtime-check/
+.netlify-check/

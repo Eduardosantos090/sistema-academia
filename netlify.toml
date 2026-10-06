@@ -1,0 +1,55 @@
+# Venceu — publicação no Netlify com banco no Supabase (PostgreSQL).
+#
+#  • Frontend (React) estático em web/dist.
+#  • API (Fastify) como Netlify Function em /api/* — mesmo domínio do site,
+#    então cookies __Host-, SameSite=Strict, CSRF e verificação de origem
+#    funcionam sem CORS.
+#  • Automação agendada (netlify/functions/automacao.mts) a cada 15 minutos.
+#
+# Variáveis obrigatórias: ver docs/DEPLOY.md.
+
+[build]
+  base = "."
+  command = "npm run build -w web"
+  publish = "web/dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+  AWS_LAMBDA_JS_RUNTIME = "nodejs22.x"
+  # Valores públicos (não são segredos). Os segredos reais continuam verificados pelo scanner.
+  SECRETS_SCAN_OMIT_KEYS = "SMTP_USER,SMTP_HOST,SMTP_PORT,MAIL_FROM,APP_ENV,APP_URL,LOG_LEVEL,MAIL_MODE,RATE_LIMIT_STORE,SUPABASE_URL,SUPABASE_REGION,DB_POOL_MAX,DATABASE_SSL,DATABASE_SSL_CA,AWS_LAMBDA_JS_RUNTIME,NODE_VERSION"
+
+[functions]
+  node_bundler = "esbuild"
+  external_node_modules = ["pg-native"]
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "no-referrer"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+    Cross-Origin-Opener-Policy = "same-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+
+[[headers]]
+  for = "/app/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

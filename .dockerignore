@@ -1,0 +1,9 @@
+node_modules
+**/node_modules
+**/dist
+**/.env
+.storage
+server/.storage
+e2e
+test-results
+.git

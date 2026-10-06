@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGPASSWORD: postgres_ci
+      # Credenciais descartáveis, válidas apenas dentro deste job.
+      TEST_DATABASE_URL: postgres://venceu_app:ci_app_pw@127.0.0.1:5432/venceu_test
+      TEST_DATABASE_OWNER_URL: postgres://venceu_owner:ci_owner_pw@127.0.0.1:5432/venceu_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Papéis do banco
+        run: |
+          psql -h 127.0.0.1 -U postgres -c "create role venceu_owner login password 'ci_owner_pw' createdb"
+          psql -h 127.0.0.1 -U postgres -c "create role venceu_app login password 'ci_app_pw' nobypassrls noinherit"
+          psql -h 127.0.0.1 -U postgres -c "create database venceu_supa owner venceu_owner"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run check:netlify
+      - run: npm test
+      - name: Testes no layout do Supabase (esquema extensions, papéis anon/authenticated)
+        run: npm test
+        env:
+          TEST_SUPABASE_LAYOUT: '1'
+          TEST_SUPERUSER_URL: postgres://postgres:postgres_ci@127.0.0.1:5432/postgres
+          TEST_DATABASE_URL: postgres://venceu_app:ci_app_pw@127.0.0.1:5432/venceu_supa
+          TEST_DATABASE_OWNER_URL: postgres://venceu_owner:ci_owner_pw@127.0.0.1:5432/venceu_supa
+      - run: npm audit --omit=dev --audit-level=high

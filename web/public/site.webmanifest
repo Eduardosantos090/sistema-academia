@@ -1,0 +1,13 @@
+{
+  "name": "Venceu — Lembretes de vencimento",
+  "short_name": "Venceu",
+  "start_url": "/app",
+  "display": "standalone",
+  "background_color": "#060A08",
+  "theme_color": "#060A08",
+  "lang": "pt-BR",
+  "icons": [
+    { "src": "/brand/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/brand/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
