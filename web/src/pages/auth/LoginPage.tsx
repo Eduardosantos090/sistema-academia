@@ -26,6 +26,7 @@ export function LoginPage() {
     setError(null);
     try {
       await login(email, password);
+      // Se a página lembrada for de outro perfil, o painel redireciona para a área certa.
       nav(from, { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Não foi possível entrar.');

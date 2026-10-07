@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../auth/AuthContext';
 import { api } from '../api/client';
@@ -48,6 +48,12 @@ export function AppLayout() {
   const { user, isOwner, hasOrg, isPlatform, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const loc = useLocation();
+  const nav = useNavigate();
+  // Sair: volta para a tela de acesso sem "lembrar" a página atual (outra conta pode entrar em seguida).
+  const signOut = async () => {
+    await logout();
+    nav('/entrar', { replace: true, state: null });
+  };
   useEffect(() => setOpen(false), [loc.pathname]);
   const counters = useQuery({
     queryKey: ['counters'],
@@ -108,7 +114,7 @@ export function AppLayout() {
             <strong>{user?.fullName}</strong>
             <span className="role">{isPlatform && !hasOrg ? 'Administração da plataforma' : user?.email}</span>
           </div>
-          <Button size="sm" variant="ghost" className="btn-icon" onClick={() => void logout()} aria-label="Sair" title="Sair">
+          <Button size="sm" variant="ghost" className="btn-icon" onClick={() => void signOut()} aria-label="Sair" title="Sair">
             <Icon name="logout" />
           </Button>
         </div>

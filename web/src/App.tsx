@@ -23,7 +23,6 @@ import { OrgPage } from './pages/platform/OrgPage';
 import { RequestsPage } from './pages/platform/RequestsPage';
 import { AuditPage } from './pages/AuditPage';
 import { AccountPage } from './pages/AccountPage';
-import { NotFoundPage } from './pages/NotFoundPage';
 
 function RequireAuth({ children, org, owner, platform }: { children: ReactNode; org?: boolean; owner?: boolean; platform?: boolean }) {
   const { user, loading, hasOrg, isOwner, isPlatform } = useAuth();
@@ -31,8 +30,26 @@ function RequireAuth({ children, org, owner, platform }: { children: ReactNode; 
   if (loading) return <Loading />;
   if (!user) return <Navigate to="/entrar" replace state={{ from: loc.pathname }} />;
   // Proteção de interface apenas; a autorização efetiva é feita no servidor e no banco (RLS).
-  if ((org && !hasOrg) || (owner && !isOwner) || (platform && !isPlatform)) return <NotFoundPage />;
+  // Página de outro perfil (ex.: tela da plataforma aberta antes de trocar de conta): vai para o painel certo.
+  if ((org && !hasOrg) || (owner && !isOwner) || (platform && !isPlatform)) return <Navigate to="/app" replace />;
   return <>{children}</>;
+}
+
+/**
+ * Endereço desconhecido: nunca mostra erro. Corrige links com prefixo extra
+ * (ex.: /algo/convite#token=...) e atalhos comuns; o resto vai para o painel
+ * (logado) ou para a página inicial.
+ */
+function UnknownRoute() {
+  const { user, loading } = useAuth();
+  const loc = useLocation();
+  if (loading) return <Loading />;
+  const path = loc.pathname.toLowerCase().replace(/\/+$/, '');
+  for (const known of ['/convite', '/redefinir-senha', '/descadastrar', '/esqueci-senha', '/entrar']) {
+    if (path.endsWith(known)) return <Navigate to={`${known}${loc.hash}`} replace />;
+  }
+  if (/^\/(login|signin|acessar|admin|painel|dashboard)$/.test(path)) return <Navigate to={user ? '/app' : '/entrar'} replace />;
+  return <Navigate to={user ? '/app' : '/'} replace />;
 }
 
 function Home() {
@@ -73,9 +90,9 @@ export function App() {
         <Route path="plataforma/pedidos" element={<RequireAuth platform><RequestsPage /></RequireAuth>} />
         <Route path="plataforma/auditoria" element={<RequireAuth platform><AuditPage /></RequireAuth>} />
         <Route path="conta" element={<AccountPage />} />
-        <Route path="*" element={<NotFoundPage />} />
+        <Route path="*" element={<Navigate to="/app" replace />} />
       </Route>
-      <Route path="*" element={<NotFoundPage standalone />} />
+      <Route path="*" element={<UnknownRoute />} />
     </Routes>
   );
 }
