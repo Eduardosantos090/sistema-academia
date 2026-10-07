@@ -1,5 +1,6 @@
 import pg from 'pg';
 import type { Config } from '../config.js';
+import { SUPABASE_ROOT_CA } from './supabase-ca.js';
 
 // numeric -> number, bigint -> number (contagens e somas)
 pg.types.setTypeParser(1700, (v) => (v === null ? null : Number(v)));
@@ -69,7 +70,10 @@ export function createPools(
  * aparece em /api/health).
  */
 export async function createPoolsResolved(config: Config): Promise<{ pools: Pools; info: DbInfo }> {
-  const ssl = sslOptions(config.DATABASE_SSL, config.DATABASE_SSL_CA);
+  // Sem CA informado, no Supabase usa o certificado raiz público embutido. Se ele
+  // não validar, a resolução ainda cai para TLS sem verificação (sinalizado em /api/health).
+  const supabase = !!config.SUPABASE_URL || /supabase\.(com|co)[:/]/.test(config.DATABASE_URL);
+  const ssl = sslOptions(config.DATABASE_SSL, validCa(config.DATABASE_SSL_CA) ?? (supabase ? SUPABASE_ROOT_CA : undefined));
   const opts = {
     supabaseUrl: config.SUPABASE_URL,
     region: config.SUPABASE_REGION,

@@ -101,21 +101,28 @@ export async function resolveDbUrl(
 ): Promise<Resolved> {
   const probe = opts.probe ?? defaultProbe;
   const candidates = candidateUrls(configured, opts.supabaseUrl, opts.region);
-  let lastErr: unknown = new Error('Nenhum endereço de banco válido configurado.');
-  for (const [i, url] of candidates.entries()) {
+  if (!candidates.length) throw new Error('Nenhum endereço de banco válido configurado.');
+  const tryOne = async (url: string, i: number): Promise<Resolved> => {
     const attempts: { ssl: Ssl; unverified: boolean }[] = [{ ssl, unverified: false }];
     if (ssl && !opts.caProvided) attempts.push({ ssl: { rejectUnauthorized: false }, unverified: true });
+    let lastErr: unknown;
     for (const a of attempts) {
       try {
         await probe(url, a.ssl);
         return { url, ssl: a.ssl, auto: i > 0 || url !== configured.trim(), tlsUnverified: a.unverified };
       } catch (err) {
         lastErr = err;
-        const e = err as { code?: string; message?: string };
-        if (e.code === '28P01') throw err; // senha errada: outro host não resolve
-        if (!isCertError(e)) break; // só vale tentar sem verificação quando o erro é do certificado
+        // só vale tentar sem verificação quando o erro é do certificado
+        if (!isCertError(err as { code?: string; message?: string })) break;
       }
     }
-  }
-  throw lastErr;
+    throw lastErr;
+  };
+  // Testa todos ao mesmo tempo (um host que não responde não atrasa os outros) e
+  // escolhe o primeiro que funcionou na ordem de preferência.
+  const results = await Promise.allSettled(candidates.map(tryOne));
+  for (const r of results) if (r.status === 'fulfilled') return r.value;
+  const errors = results.map((r) => (r as PromiseRejectedResult).reason as { code?: string });
+  // Senha recusada é o motivo mais útil a relatar (outro host não resolveria).
+  throw errors.find((e) => e?.code === '28P01') ?? errors[0];
 }
