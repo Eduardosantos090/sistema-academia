@@ -8,6 +8,12 @@
 5. **Clientes → Novo cliente**: informe WhatsApp/e-mail e marque "Criar assinatura" com o primeiro vencimento.
 6. **Configurações → Equipe**: convide atendentes (perfil Equipe).
 
+## Importar clientes de uma planilha
+Em **Clientes → Importar planilha**: baixe o modelo ou use a sua planilha salva como **CSV** (Excel: Arquivo → Salvar como → CSV).
+Colunas reconhecidas: Nome (obrigatória), WhatsApp/Celular, E-mail, CPF, Plano, Valor, Periodicidade e Vencimento (data ou só o dia do mês).
+Com Vencimento + Plano (nome de um plano cadastrado) ou Valor, a assinatura é criada e as cobranças são geradas. Quem já está
+cadastrado (mesmo WhatsApp ou e-mail) é ignorado, e as linhas com problema são listadas para correção. Até 2.000 clientes por vez.
+
 ## Rotina do dia
 - **Painel**: veja quem vence hoje, quem está em atraso e os avisos de "já paguei".
 - **Mensagens → Para enviar no WhatsApp** (modo manual): envie os lembretes com um clique.

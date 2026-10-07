@@ -208,3 +208,29 @@ describe('áudio gravado no navegador', () => {
     expect(file.subarray(28, 36).toString('latin1')).toBe('OpusHead');
   });
 });
+
+describe('importação de clientes por planilha', () => {
+  it('importa, cria assinaturas, ignora duplicados e informa erros por linha', async () => {
+    const { owner, orgId } = await createOrg(ctx, platform);
+    await owner.post('/api/plans', { name: 'Plano Mensal', amountCents: 12990, intervalMonths: 1 });
+    const due = await orgToday(ctx, orgId, 5);
+    const rows = [
+      { name: 'Ana Importada', phone: '(11) 95555-0001', email: 'ana@imp.test', planName: 'plano mensal', firstDueDate: due },
+      { name: 'Beto Personalizado', phone: '11955550002', amountCents: 9900, intervalMonths: 3, planName: 'Trimestral promo', firstDueDate: due },
+      { name: 'Carla Sem Plano', email: 'carla@imp.test' },
+      { name: 'Ana Repetida', phone: '+5511955550001' },
+      { name: 'X', phone: 'abc' },
+      { name: 'Sem Valor', planName: 'Plano Inexistente', firstDueDate: due },
+    ];
+    const r = await owner.post('/api/customers/import', { rows });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ created: 3, subscriptions: 2, duplicates: 1 });
+    expect(r.json().errors.map((e: { line: number }) => e.line)).toEqual([6, 7]);
+    const list = json(await owner.get('/api/customers?pageSize=50'));
+    expect(list.total).toBe(3);
+    const ana = list.items.find((c: { name: string }) => c.name === 'Ana Importada');
+    expect(ana).toMatchObject({ planName: 'Plano Mensal', nextDueDate: due });
+    const beto = json(await owner.get(`/api/customers/${list.items.find((c: { name: string }) => c.name === 'Beto Personalizado').id}`));
+    expect(beto.subscriptions[0]).toMatchObject({ amountCents: 9900, intervalMonths: 3, description: 'Trimestral promo' });
+  });
+});

@@ -6,6 +6,7 @@ import type { Customer, Paged } from '../../api/types';
 import { Button, Empty, ErrorState, Loading, PageHeader, Pagination, SearchInput, Segmented, usePageTitle } from '../../components/ui';
 import { Icon, WhatsAppIcon } from '../../components/icons';
 import { CustomerFormModal } from '../../components/CustomerModals';
+import { ImportCustomersModal } from '../../components/ImportCustomers';
 import { fmtCents, fmtDate, fmtPhone, initials } from '../../lib/format';
 import { useDebounced } from '../../lib/hooks';
 
@@ -18,6 +19,7 @@ export function CustomerListPage() {
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const dq = useDebounced(q, 300);
   const list = useQuery({
     queryKey: ['customers', status, dq, page],
@@ -30,7 +32,12 @@ export function CustomerListPage() {
       <PageHeader
         title="Clientes"
         subtitle="Alunos, pacientes, assinantes — todos que recebem cobranças da sua empresa."
-        actions={<Button variant="primary" onClick={() => setCreating(true)}><Icon name="plus" /> Novo cliente</Button>}
+        actions={
+          <>
+            <Button onClick={() => setImporting(true)}><Icon name="file" /> Importar planilha</Button>
+            <Button variant="primary" onClick={() => setCreating(true)}><Icon name="plus" /> Novo cliente</Button>
+          </>
+        }
       />
       <div className="toolbar">
         <SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Buscar por nome, e-mail, telefone ou CPF" label="Buscar clientes" />
@@ -54,7 +61,10 @@ export function CustomerListPage() {
         ) : !list.data?.items.length ? (
           <Empty title={q ? 'Nenhum cliente encontrado' : 'Nenhum cliente por aqui'} icon="users">
             {!q && status === 'todos' && (
-              <Button variant="primary" onClick={() => setCreating(true)}><Icon name="plus" /> Cadastrar o primeiro cliente</Button>
+              <div className="row" style={{ justifyContent: 'center' }}>
+                <Button onClick={() => setImporting(true)}><Icon name="file" /> Importar planilha</Button>
+                <Button variant="primary" onClick={() => setCreating(true)}><Icon name="plus" /> Cadastrar o primeiro cliente</Button>
+              </div>
             )}
           </Empty>
         ) : (
@@ -106,6 +116,7 @@ export function CustomerListPage() {
           </>
         )}
       </div>
+      {importing && <ImportCustomersModal onClose={() => setImporting(false)} />}
       {creating && <CustomerFormModal onClose={() => setCreating(false)} onSaved={(id) => nav(`/app/clientes/${id}`)} />}
     </div>
   );
