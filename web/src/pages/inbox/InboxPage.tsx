@@ -7,7 +7,7 @@ import { Alert, Button, Empty, ErrorState, Loading, PageHeader, Segmented, Selec
 import { Icon, WhatsAppIcon } from '../../components/icons';
 import { fmtDateTime, fmtPhone } from '../../lib/format';
 import { useDebounced } from '../../lib/hooks';
-import { MediaPreview, uploadMedia } from '../../components/Media';
+import { AudioRecorder, MediaPreview, uploadMedia } from '../../components/Media';
 import type { MediaFile } from '../../api/types';
 
 type Tab = 'conversas' | 'simulador';
@@ -181,6 +181,7 @@ function Chat({ id }: { id: string }) {
         <Button variant="ghost" className="btn-icon" loading={uploading} onClick={() => fileInput.current?.click()} aria-label="Anexar imagem, áudio ou PDF" title="Anexar imagem, áudio ou PDF">
           <Icon name="link" />
         </Button>
+        <AudioRecorder onRecorded={setAttachment} disabled={uploading} />
         <textarea
           className="textarea"
           value={text}

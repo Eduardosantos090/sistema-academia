@@ -34,7 +34,7 @@
 - **Pedidos de acesso**: aprove com um clique os pedidos feitos pelo site.
 
 ## Novidades
-- **Anexos (imagem, áudio, PDF)**: em Automação → Respostas do assistente e → Modelos, anexe um arquivo (até 4 MB) que vai junto da mensagem. No Atendimento, use o clipe para enviar imagem, áudio ou PDF ao cliente.
+- **Anexos (imagem, áudio, PDF)**: em Automação → Respostas do assistente e → Modelos, anexe um arquivo (até 4 MB) que vai junto da mensagem. No Atendimento, use o clipe para enviar imagem, áudio ou PDF ao cliente, ou o **microfone** para gravar um áudio na hora (até 5 min). O áudio gravado é convertido automaticamente para o formato de mensagem de voz do WhatsApp (Ogg/Opus).
 - **Intervalo entre mensagens**: Configurações → Cobrança e assistente → "Intervalo entre mensagens" (segundos ou minutos). Os disparos saem um a um nesse ritmo, reduzindo o risco de bloqueio do WhatsApp.
 - **Controle de envios**: mostra, para cada cobrança em atraso ou que vence no período, se o cliente já recebeu o lembrete, se falta, se está na fila ou se falhou. Selecione e envie, ou use "Enviar para quem falta".
 - **Painel**: bloco "Próximos vencimentos — hoje, 1, 2 e 3 dias", com quem já recebeu lembrete.

@@ -36,7 +36,7 @@
     Referrer-Policy = "no-referrer"
     Strict-Transport-Security = "max-age=31536000; includeSubDomains"
     Cross-Origin-Opener-Policy = "same-origin"
-    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
+    Permissions-Policy = "camera=(), microphone=(self), geolocation=(), payment=()"
     Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
 
 [[headers]]

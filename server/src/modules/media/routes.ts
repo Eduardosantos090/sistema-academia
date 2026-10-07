@@ -6,6 +6,7 @@ import { AppError, notFound } from '../../lib/errors.js';
 import { parse } from '../../lib/validate.js';
 import { zText, zUuid } from '../../lib/normalize.js';
 import { MAX_MEDIA_BYTES, mediaUrl, safeFileName, sniffMime } from '../../lib/media.js';
+import { isWebm, webmOpusToOgg } from '../../lib/webm-to-ogg.js';
 
 const COLS = `id, name, mime, size_bytes as "sizeBytes", token, created_at as "createdAt"`;
 
@@ -27,8 +28,18 @@ export function registerMediaRoutes(app: FastifyInstance, deps: Deps) {
     await deps.limiters.sendNow.consume(`media:${me.id}`);
     const b64 = body.data.replace(/^data:[^;]+;base64,/, '');
     if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) throw new AppError(422, 'invalid', 'Arquivo inválido.');
-    const buf = Buffer.from(b64, 'base64');
+    let buf: Buffer = Buffer.from(b64, 'base64');
+    let name = body.name;
     if (buf.length > MAX_MEDIA_BYTES) throw new AppError(413, 'too_large', 'Arquivo acima de 4 MB.');
+    // Áudio gravado no navegador (Chrome grava WebM/Opus): convertido para Ogg/Opus, aceito pelo WhatsApp.
+    if (!sniffMime(buf) && isWebm(buf)) {
+      try {
+        buf = webmOpusToOgg(buf);
+        name = `${name.replace(/\.[^.]*$/, '') || 'audio'}.ogg`;
+      } catch {
+        throw new AppError(415, 'unsupported', 'Não foi possível converter este áudio. Grave novamente ou envie em OGG, MP3 ou M4A.');
+      }
+    }
     const mime = sniffMime(buf);
     if (!mime) {
       throw new AppError(415, 'unsupported', 'Formato não aceito. Use imagem JPG/PNG, áudio (OGG, MP3, M4A, AAC, AMR) ou PDF.');
@@ -37,7 +48,7 @@ export function registerMediaRoutes(app: FastifyInstance, deps: Deps) {
       const { rows } = await db.query<{ id: string; token: string; name: string }>(
         `insert into media_files (organization_id, name, mime, size_bytes, data, created_by)
          values ($1, $2, $3, $4, $5, app.uid()) returning ${COLS}`,
-        [me.orgId, safeFileName(body.name), mime, buf.length, buf],
+        [me.orgId, safeFileName(name), mime, buf.length, buf],
       );
       await audit(db, req, 'media.uploaded', 'media', rows[0]!.id, me.orgId, { mime, size: buf.length });
       return rows[0]!;

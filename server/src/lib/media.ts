@@ -16,7 +16,7 @@ export function sniffMime(b: Buffer): MediaMime | null {
   if (b.subarray(0, 6).toString('latin1') === '#!AMR\n') return 'audio/amr';
   if (b.subarray(4, 8).toString('latin1') === 'ftyp') {
     const brand = b.subarray(8, 12).toString('latin1');
-    return /^(M4A |M4B |mp42|isom|mp41|dash)/.test(brand) ? 'audio/mp4' : null;
+    return /^(M4A |M4B |mp42|isom|mp41|dash|iso5|iso6)/.test(brand) ? 'audio/mp4' : null;
   }
   if (b.subarray(0, 3).toString('latin1') === 'ID3') return 'audio/mpeg';
   if (b[0] === 0xff && (b[1]! & 0xf6) === 0xf0) return 'audio/aac'; // ADTS

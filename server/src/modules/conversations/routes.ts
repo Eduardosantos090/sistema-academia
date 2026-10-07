@@ -97,7 +97,7 @@ export function registerConversationRoutes(app: FastifyInstance, deps: Deps) {
       await db.query(
         `insert into chat_messages (organization_id, conversation_id, direction, author, body, user_id, media_id)
          values ($1, $2, 'out', 'atendente', $3, app.uid(), $4)`,
-        [me.orgId, id, body.text || `[${media?.name ?? 'anexo'}]`, body.mediaId ?? null],
+        [me.orgId, id, body.text || (media?.mime.startsWith('audio/') ? '🎤 Áudio' : media?.mime.startsWith('image/') ? '🖼️ Imagem' : '📄 Documento'), body.mediaId ?? null],
       );
       await db.query(`update conversations set status = 'humano', unread = 0, last_message_at = now() where id = $1`, [id]);
       return { ...rows[0], media };

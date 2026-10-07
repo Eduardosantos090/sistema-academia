@@ -176,3 +176,35 @@ describe('plano e acesso das organizações (plataforma)', () => {
     expect(json(await platform.get(`/api/platform/orgs/${c.orgId}`))).toMatchObject({ isActive: true, suspendedReason: null });
   });
 });
+
+describe('áudio gravado no navegador', () => {
+  it('WebM/Opus é convertido para Ogg/Opus válido', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { oggCrc } = await import('../src/lib/webm-to-ogg.js');
+    const { owner } = await createOrg(ctx, platform);
+    const webm = readFileSync(new URL('./fixtures/voz.webm', import.meta.url));
+    const r = await owner.post('/api/media', { name: 'gravacao.webm', data: webm.toString('base64') });
+    expect(r.statusCode).toBe(201);
+    expect(r.json()).toMatchObject({ mime: 'audio/ogg', name: 'gravacao.ogg' });
+    const file = (await ctx.app.inject({ method: 'GET', url: new URL(r.json().url).pathname })).rawPayload;
+    // Percorre as páginas Ogg conferindo assinatura e CRC; a última traz a duração (~3 s a 48 kHz).
+    let pos = 0;
+    let pages = 0;
+    let granule = 0n;
+    while (pos < file.length) {
+      expect(file.subarray(pos, pos + 4).toString('latin1')).toBe('OggS');
+      const nseg = file[pos + 26]!;
+      const body = file.subarray(pos + 27, pos + 27 + nseg).reduce((a, x) => a + x, 0);
+      const page = Buffer.from(file.subarray(pos, pos + 27 + nseg + body));
+      const crc = page.readUInt32LE(22);
+      page.writeUInt32LE(0, 22);
+      expect(oggCrc(page)).toBe(crc);
+      granule = file.readBigInt64LE(pos + 6);
+      pos += 27 + nseg + body;
+      pages++;
+    }
+    expect(pages).toBeGreaterThan(2);
+    expect(Number(granule) / 48000).toBeGreaterThan(2.9);
+    expect(file.subarray(28, 36).toString('latin1')).toBe('OpusHead');
+  });
+});

@@ -423,3 +423,7 @@ table.table { width: 100%; border-collapse: collapse; }
 .wa-demo { padding: 14px; }
 .wa-demo .bubble { max-width: 92%; font-size: .88rem; }
 .table .actions .row-sm { flex-wrap: nowrap; }
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 10px var(--danger); animation: rec 1s ease-in-out infinite; }
+@keyframes rec { 50% { opacity: .35; } }
+.chat-compose { flex-wrap: wrap; }
+.chat-compose .textarea { flex: 1; min-width: 180px; }
