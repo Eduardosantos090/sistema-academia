@@ -137,7 +137,7 @@ export function registerReminderRoutes(app: FastifyInstance, deps: Deps) {
     }
     await asUser(deps, req, (db) => audit(db, req, 'reminders.bulk_send', 'charge', null, me.orgId, { charges: ids.length, ...result, errors: undefined }));
     // Primeiros envios já agora (respeitando o intervalo); o restante sai pela rotina automática.
-    if (result.queued) await dispatchPending(deps, { deadline: Date.now() + 8000 }).catch(() => undefined);
+    if (result.queued) await dispatchPending(deps, { deadline: Date.now() + 8000, orgId: me.orgId }).catch(() => undefined);
     return { ...result, errors: [...new Set(result.errors)] };
   });
 }

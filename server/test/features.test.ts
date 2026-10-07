@@ -234,3 +234,24 @@ describe('importação de clientes por planilha', () => {
     expect(beto.subscriptions[0]).toMatchObject({ amountCents: 9900, intervalMonths: 3, description: 'Trimestral promo' });
   });
 });
+
+describe('exportação em planilha', () => {
+  it('exporta cobranças e clientes da própria organização, protegendo contra fórmulas', async () => {
+    const a = await createOrg(ctx, platform);
+    const b = await createOrg(ctx, platform);
+    const c = await createCustomer(a.owner, { name: '=HYPERLINK("http://mal.example","clique")', phone: '(11) 95000-1111' });
+    await a.owner.post('/api/charges', { customerId: c, description: 'Mensalidade; outubro', amountCents: 12990, dueDate: await orgToday(ctx, a.orgId, 3) });
+    await createCustomer(b.owner, { name: 'Cliente da Outra Empresa', phone: '(11) 95000-2222' });
+    const ch = await a.owner.get('/api/charges/export?filter=abertas');
+    expect(ch.statusCode).toBe(200);
+    expect(ch.headers['content-type']).toContain('text/csv');
+    expect(ch.headers['content-disposition']).toContain('attachment');
+    expect(ch.body.charCodeAt(0)).toBe(0xfeff);
+    expect(ch.body).toContain(`"'=HYPERLINK(""http://mal.example"",""clique"")"`);
+    expect(ch.body).toContain('"Mensalidade; outubro";129,90');
+    const cu = await a.owner.get('/api/customers/export');
+    expect(cu.body).not.toContain('Outra Empresa');
+    expect(cu.body.split('\r\n').filter(Boolean)).toHaveLength(2);
+    expect((await platform.get('/api/customers/export')).statusCode).toBe(403);
+  });
+});

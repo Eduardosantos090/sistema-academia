@@ -55,7 +55,14 @@ export function ChargesPage() {
       <PageHeader
         title="Cobranças"
         subtitle="Vencimentos gerados pelas assinaturas e cobranças avulsas."
-        actions={<Button variant="primary" onClick={() => setCreating(true)}><Icon name="plus" /> Cobrança avulsa</Button>}
+        actions={
+          <>
+            <a className="btn" href={`/api/charges/export${qs({ filter, q: dq })}`} download>
+              <Icon name="file" /> Exportar planilha
+            </a>
+            <Button variant="primary" onClick={() => setCreating(true)}><Icon name="plus" /> Cobrança avulsa</Button>
+          </>
+        }
       />
       <div className="toolbar">
         <Segmented<Filter>

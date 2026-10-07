@@ -193,15 +193,17 @@ interface OrgQueue {
  * enviam em lote; com intervalo, uma mensagem por vez. O que não couber no
  * tempo desta execução sai na próxima (a rotina roda a cada minuto).
  */
-export async function dispatchPending(deps: Deps, opts: { deadline: number; batch?: number }) {
+export async function dispatchPending(deps: Deps, opts: { deadline: number; batch?: number; orgId?: string }) {
   let sent = 0;
   let failed = 0;
+  // orgId: envio disparado por uma organização processa SOMENTE a fila dela.
   const { rows: orgs } = await deps.pools.owner.query<{ id: string; delay: number; last: Date | null }>(
     `select o.id, o.send_delay_seconds as delay, o.last_dispatch_at as last
        from organizations o
-      where o.is_active and exists (
+      where o.is_active and ($1::uuid is null or o.id = $1) and exists (
         select 1 from messages m where m.organization_id = o.id and m.status = 'pendente'
            and m.attempts < ${MAX_ATTEMPTS} and m.created_at > now() - interval '3 days')`,
+    [opts.orgId ?? null],
   );
   const queues: OrgQueue[] = orgs.map((o) => ({
     id: o.id,
@@ -253,6 +255,7 @@ export async function dispatchPending(deps: Deps, opts: { deadline: number; batc
       }
     }
   }
+  if (opts.orgId) return { sent, failed };
   // Pendências antigas demais (ex.: integração desligada por dias) não são mais enviadas.
   await deps.pools.owner.query(
     `update messages set status = 'falhou', error = coalesce(error, 'Expirada sem envio.')

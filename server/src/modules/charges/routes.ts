@@ -8,6 +8,8 @@ import { Where } from '../../lib/sql.js';
 import { likePattern, zCents, zDate, zHttpsUrl, zOptionalText, zPage, zText, zUuid } from '../../lib/normalize.js';
 import { sendChargeMessage } from '../messages/service.js';
 import { emailAvailable, loadChannels } from '../channels/service.js';
+import { formatPhoneBr } from '../../lib/template.js';
+import { csvDate, csvDateTime, csvMoney, toCsv } from '../../lib/csv.js';
 
 const CHARGE_COLS = `ch.id, ch.description, ch.amount_cents as "amountCents", to_char(ch.due_date, 'YYYY-MM-DD') as "dueDate",
   ch.status, ch.paid_at as "paidAt", ch.paid_amount_cents as "paidAmountCents", ch.payment_method as "paymentMethod",
@@ -17,51 +19,89 @@ const CHARGE_COLS = `ch.id, ch.description, ch.amount_cents as "amountCents", to
   (app.org_today(ch.organization_id) - ch.due_date) as "daysLate",
   cu.id as "customerId", cu.name as "customerName", cu.phone as "customerPhone", cu.email as "customerEmail"`;
 
-const FILTERS = ['abertas', 'atrasadas', 'vencendo', 'hoje', 'a_conferir', 'pagas', 'canceladas', 'todas'] as const;
+const CHARGE_FROM = 'from charges ch join customers cu on cu.id = ch.customer_id';
+
+const zChargeFilters = {
+  filter: z.enum(['abertas', 'atrasadas', 'vencendo', 'hoje', 'a_conferir', 'pagas', 'canceladas', 'todas']).default('abertas'),
+  q: z.string().max(100).optional(),
+  customerId: zUuid.optional(),
+  from: zDate.optional(),
+  to: zDate.optional(),
+};
+
+/** Filtros da lista de cobranças (sempre parametrizados). */
+function chargeWhere(q: { filter: string; q?: string; customerId?: string; from?: string; to?: string }) {
+  const w = new Where();
+  const today = 'app.org_today(ch.organization_id)';
+  switch (q.filter) {
+    case 'abertas': w.raw(`ch.status = 'aberta'`); break;
+    case 'atrasadas': w.raw(`ch.status = 'aberta' and ch.due_date < ${today}`); break;
+    case 'hoje': w.raw(`ch.status = 'aberta' and ch.due_date = ${today}`); break;
+    case 'vencendo': w.raw(`ch.status = 'aberta' and ch.due_date between ${today} and ${today} + 7`); break;
+    case 'a_conferir': w.raw(`ch.status = 'aberta' and ch.reported_paid_at is not null`); break;
+    case 'pagas': w.raw(`ch.status = 'paga'`); break;
+    case 'canceladas': w.raw(`ch.status = 'cancelada'`); break;
+    default: break;
+  }
+  if (q.q) w.add('(cu.name ilike ? or ch.description ilike ?)', likePattern(q.q));
+  if (q.customerId) w.add('ch.customer_id = ?', q.customerId);
+  if (q.from) w.add('ch.due_date >= ?::date', q.from);
+  if (q.to) w.add('ch.due_date <= ?::date', q.to);
+  return w;
+}
+
+const chargeOrder = (filter: string) =>
+  filter === 'pagas' ? 'ch.paid_at desc' : filter === 'canceladas' || filter === 'todas' ? 'ch.due_date desc' : 'ch.due_date, cu.name';
+
 
 const zMethod = z.enum(['pix', 'dinheiro', 'cartao', 'boleto', 'transferencia', 'outro']);
 
 export function registerChargeRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/charges', async (req) => {
     requireOrg(req);
-    const q = parse(
-      zPage.extend({
-        filter: z.enum(FILTERS).default('abertas'),
-        q: z.string().max(100).optional(),
-        customerId: zUuid.optional(),
-        from: zDate.optional(),
-        to: zDate.optional(),
-      }),
-      req.query,
-    );
+    const q = parse(zPage.extend(zChargeFilters), req.query);
     return asUser(deps, req, async (db) => {
-      const w = new Where();
-      const today = 'app.org_today(ch.organization_id)';
-      switch (q.filter) {
-        case 'abertas': w.raw(`ch.status = 'aberta'`); break;
-        case 'atrasadas': w.raw(`ch.status = 'aberta' and ch.due_date < ${today}`); break;
-        case 'hoje': w.raw(`ch.status = 'aberta' and ch.due_date = ${today}`); break;
-        case 'vencendo': w.raw(`ch.status = 'aberta' and ch.due_date between ${today} and ${today} + 7`); break;
-        case 'a_conferir': w.raw(`ch.status = 'aberta' and ch.reported_paid_at is not null`); break;
-        case 'pagas': w.raw(`ch.status = 'paga'`); break;
-        case 'canceladas': w.raw(`ch.status = 'cancelada'`); break;
-        default: break;
-      }
-      if (q.q) w.add('(cu.name ilike ? or ch.description ilike ?)', likePattern(q.q));
-      if (q.customerId) w.add('ch.customer_id = ?', q.customerId);
-      if (q.from) w.add('ch.due_date >= ?::date', q.from);
-      if (q.to) w.add('ch.due_date <= ?::date', q.to);
-      const from = 'from charges ch join customers cu on cu.id = ch.customer_id';
+      const w = chargeWhere(q);
       const totals = await db.query<{ n: number; cents: number }>(
-        `select count(*)::int as n, coalesce(sum(ch.amount_cents), 0)::bigint as cents ${from} ${w.clause}`,
+        `select count(*)::int as n, coalesce(sum(ch.amount_cents), 0)::bigint as cents ${CHARGE_FROM} ${w.clause}`,
         w.params,
       );
       const lim = w.param(q.pageSize);
       const off = w.param((q.page - 1) * q.pageSize);
-      const order = q.filter === 'pagas' ? 'ch.paid_at desc' : q.filter === 'canceladas' || q.filter === 'todas' ? 'ch.due_date desc' : 'ch.due_date, cu.name';
-      const { rows } = await db.query(`select ${CHARGE_COLS} ${from} ${w.clause} order by ${order} limit ${lim} offset ${off}`, w.params);
+      const { rows } = await db.query(
+        `select ${CHARGE_COLS} ${CHARGE_FROM} ${w.clause} order by ${chargeOrder(q.filter)} limit ${lim} offset ${off}`,
+        w.params,
+      );
       return { items: rows, total: totals.rows[0]!.n, totalCents: totals.rows[0]!.cents, page: q.page, pageSize: q.pageSize };
     });
+  });
+
+  /** Planilha (CSV) das cobranças do filtro atual — até 20 mil linhas. */
+  app.get('/api/charges/export', async (req, reply) => {
+    const me = requireOrg(req);
+    const q = parse(z.object(zChargeFilters), req.query);
+    const rows = await asUser(deps, req, async (db) => {
+      const w = chargeWhere(q);
+      const r = await db.query<{
+        dueDate: string; customerName: string; customerPhone: string | null; customerEmail: string | null; description: string;
+        amountCents: number; status: string; overdue: boolean; daysLate: number; paidAt: Date | null; paidAmountCents: number | null;
+        paymentMethod: string | null; reportedPaidAt: Date | null;
+      }>(`select ${CHARGE_COLS} ${CHARGE_FROM} ${w.clause} order by ${chargeOrder(q.filter)} limit 20000`, w.params);
+      await audit(db, req, 'charge.exported', 'charge', null, me.orgId, { filter: q.filter, rows: r.rowCount });
+      return r.rows;
+    });
+    const status = (c: (typeof rows)[number]) =>
+      c.status === 'paga' ? 'Paga' : c.status === 'cancelada' ? 'Cancelada' : c.overdue ? `Em atraso (${c.daysLate} dias)` : 'Em aberto';
+    const csv = toCsv(
+      ['Vencimento', 'Cliente', 'WhatsApp', 'E-mail', 'Descrição', 'Valor (R$)', 'Situação', 'Pago em', 'Valor pago (R$)', 'Forma', 'Cliente informou pagamento'],
+      rows.map((c) => [
+        csvDate(c.dueDate), c.customerName, formatPhoneBr(c.customerPhone), c.customerEmail, c.description, csvMoney(c.amountCents), status(c),
+        csvDateTime(c.paidAt), csvMoney(c.paidAmountCents), c.paymentMethod, csvDateTime(c.reportedPaidAt),
+      ]),
+    );
+    reply.header('Content-Type', 'text/csv; charset=utf-8');
+    reply.header('Content-Disposition', `attachment; filename="cobrancas-${q.filter}-${new Date().toISOString().slice(0, 10)}.csv"`);
+    return csv;
   });
 
   app.post('/api/charges', async (req, reply) => {

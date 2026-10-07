@@ -34,6 +34,9 @@ export function CustomerListPage() {
         subtitle="Alunos, pacientes, assinantes — todos que recebem cobranças da sua empresa."
         actions={
           <>
+            <a className="btn" href={`/api/customers/export${qs({ status, q: dq })}`} download>
+              <Icon name="file" /> Exportar
+            </a>
             <Button onClick={() => setImporting(true)}><Icon name="file" /> Importar planilha</Button>
             <Button variant="primary" onClick={() => setCreating(true)}><Icon name="plus" /> Novo cliente</Button>
           </>

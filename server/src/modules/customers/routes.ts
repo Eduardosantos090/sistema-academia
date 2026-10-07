@@ -18,6 +18,8 @@ import {
   zDate,
 } from '../../lib/normalize.js';
 import { zInterval } from '../plans/routes.js';
+import { formatPhoneBr } from '../../lib/template.js';
+import { csvDate, csvMoney, toCsv } from '../../lib/csv.js';
 import { createSubscription, zNewSubscriptionFields } from '../subscriptions/routes.js';
 
 const zCustomerFields = {
@@ -44,50 +46,82 @@ const IMPORT_LABELS: Record<string, string> = {
   amountCents: 'Valor', intervalMonths: 'Periodicidade', firstDueDate: 'Vencimento',
 };
 
+const zCustomerFilters = {
+  q: z.string().max(100).optional(),
+  status: z.enum(['todos', 'em_dia', 'atrasados', 'inativos']).default('todos'),
+};
+
+function customerWhere(q: { q?: string; status: string }) {
+  const w = new Where();
+  if (q.q) {
+    const digits = q.q.replace(/\D/g, '');
+    const text = w.param(likePattern(q.q));
+    if (digits.length >= 4) {
+      const num = w.param(`%${digits}%`);
+      w.raw(`(c.name ilike ${text} or c.email::text ilike ${text} or c.phone like ${num} or c.document like ${num})`);
+    } else {
+      w.raw(`(c.name ilike ${text} or c.email::text ilike ${text})`);
+    }
+  }
+  if (q.status === 'inativos') w.raw('not c.is_active');
+  else w.raw('c.is_active');
+  const overdue = `exists (select 1 from charges ch where ch.customer_id = c.id and ch.status = 'aberta'
+                    and ch.due_date < app.org_today(c.organization_id))`;
+  if (q.status === 'atrasados') w.raw(overdue);
+  if (q.status === 'em_dia') w.raw(`not ${overdue}`);
+  return w;
+}
+
+const PLAN_NAME_SQL = `(select s.description from subscriptions s where s.customer_id = c.id and s.status = 'ativa'
+  order by s.created_at desc limit 1) as "planName"`;
+
 const CUSTOMER_COLS = `c.id, c.name, c.email, c.phone, c.document, c.notes, c.whatsapp_opt_in as "whatsappOptIn",
   c.email_opt_in as "emailOptIn", c.is_active as "isActive", c.created_at as "createdAt"`;
 
 export function registerCustomerRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/customers', async (req) => {
     requireOrg(req);
-    const q = parse(
-      zPage.extend({
-        q: z.string().max(100).optional(),
-        status: z.enum(['todos', 'em_dia', 'atrasados', 'inativos']).default('todos'),
-      }),
-      req.query,
-    );
+    const q = parse(zPage.extend(zCustomerFilters), req.query);
     return asUser(deps, req, async (db) => {
-      const w = new Where();
-      if (q.q) {
-        const digits = q.q.replace(/\D/g, '');
-        const text = w.param(likePattern(q.q));
-        if (digits.length >= 4) {
-          const num = w.param(`%${digits}%`);
-          w.raw(`(c.name ilike ${text} or c.email::text ilike ${text} or c.phone like ${num} or c.document like ${num})`);
-        } else {
-          w.raw(`(c.name ilike ${text} or c.email::text ilike ${text})`);
-        }
-      }
-      if (q.status === 'inativos') w.raw('not c.is_active');
-      else w.raw('c.is_active');
-      const overdue = `exists (select 1 from charges ch where ch.customer_id = c.id and ch.status = 'aberta'
-                        and ch.due_date < app.org_today(c.organization_id))`;
-      if (q.status === 'atrasados') w.raw(overdue);
-      if (q.status === 'em_dia') w.raw(`not ${overdue}`);
+      const w = customerWhere(q);
       const total = await db.query<{ n: number }>(`select count(*)::int as n from customers c ${w.clause}`, w.params);
       const lim = w.param(q.pageSize);
       const off = w.param((q.page - 1) * q.pageSize);
       const { rows } = await db.query(
-        `select ${CUSTOMER_COLS}, ${CUSTOMER_FINANCE_SQL},
-                (select s.description from subscriptions s where s.customer_id = c.id and s.status = 'ativa'
-                  order by s.created_at desc limit 1) as "planName"
+        `select ${CUSTOMER_COLS}, ${CUSTOMER_FINANCE_SQL}, ${PLAN_NAME_SQL}
            from customers c ${w.clause}
           order by c.name limit ${lim} offset ${off}`,
         w.params,
       );
       return { items: rows, total: total.rows[0]!.n, page: q.page, pageSize: q.pageSize };
     });
+  });
+
+  /** Planilha (CSV) dos clientes do filtro atual. */
+  app.get('/api/customers/export', async (req, reply) => {
+    const me = requireOrg(req);
+    const q = parse(z.object(zCustomerFilters), req.query);
+    const rows = await asUser(deps, req, async (db) => {
+      const w = customerWhere(q);
+      const r = await db.query<{
+        name: string; phone: string | null; email: string | null; document: string | null; planName: string | null;
+        isActive: boolean; overdueCount: number; overdueCents: number; nextDueDate: string | null;
+        whatsappOptIn: boolean; emailOptIn: boolean; createdAt: Date;
+      }>(`select ${CUSTOMER_COLS}, ${CUSTOMER_FINANCE_SQL}, ${PLAN_NAME_SQL} from customers c ${w.clause} order by c.name limit 20000`, w.params);
+      await audit(db, req, 'customer.exported', 'customer', null, me.orgId, { status: q.status, rows: r.rowCount });
+      return r.rows;
+    });
+    const csv = toCsv(
+      ['Nome', 'WhatsApp', 'E-mail', 'CPF/CNPJ', 'Plano', 'Situação', 'Em atraso (R$)', 'Próximo vencimento', 'Recebe WhatsApp', 'Recebe e-mail', 'Cliente desde'],
+      rows.map((c) => [
+        c.name, formatPhoneBr(c.phone), c.email, c.document, c.planName,
+        !c.isActive ? 'Inativo' : c.overdueCount ? 'Em atraso' : 'Em dia',
+        csvMoney(c.overdueCents), csvDate(c.nextDueDate), c.whatsappOptIn ? 'Sim' : 'Não', c.emailOptIn ? 'Sim' : 'Não', csvDate(c.createdAt.toISOString()),
+      ]),
+    );
+    reply.header('Content-Type', 'text/csv; charset=utf-8');
+    reply.header('Content-Disposition', `attachment; filename="clientes-${q.status}-${new Date().toISOString().slice(0, 10)}.csv"`);
+    return csv;
   });
 
   app.post('/api/customers', async (req, reply) => {
