@@ -4,6 +4,7 @@ import type { Db } from '../../lib/db.js';
 import { decryptSecret, hmacHex } from '../../lib/secrets.js';
 import { OutboundError } from '../../lib/http.js';
 import { mediaKind } from '../../lib/media.js';
+import type { Mailer, OrgSmtp } from '../../lib/mailer.js';
 
 export type WhatsAppMode = 'manual' | 'cloud_api' | 'webhook';
 
@@ -17,6 +18,8 @@ export interface ChannelConfig {
   webhookSecret: string | null;
   emailEnabled: boolean;
   emailReplyTo: string | null;
+  /** Conta de e-mail própria (null = remetente da plataforma). */
+  smtp: Omit<OrgSmtp, 'fromName'> & { fromName: string | null } | null;
 }
 
 export const GRAPH_API = 'https://graph.facebook.com/v21.0';
@@ -31,6 +34,11 @@ interface ChannelRow {
   webhook_secret_enc: string | null;
   email_enabled: boolean;
   email_reply_to: string | null;
+  smtp_host: string | null;
+  smtp_port: number | null;
+  smtp_user: string | null;
+  smtp_password_enc: string | null;
+  smtp_from_name: string | null;
 }
 
 /** Lê (e decifra) a configuração de canais. Somente pelo servidor privilegiado. */
@@ -48,7 +56,20 @@ export async function loadChannels(deps: Deps, orgId: string, db: Db | pg.Pool =
     webhookSecret: decryptSecret(key, r?.webhook_secret_enc),
     emailEnabled: r?.email_enabled ?? true,
     emailReplyTo: r?.email_reply_to ?? null,
+    smtp: smtpFromRow(key, r),
   };
+}
+
+function smtpFromRow(key: Buffer, r: ChannelRow | undefined): ChannelConfig['smtp'] {
+  if (!r?.smtp_host || !r.smtp_port || !r.smtp_user) return null;
+  const password = decryptSecret(key, r.smtp_password_enc);
+  if (!password) return null;
+  return { host: r.smtp_host, port: r.smtp_port, user: r.smtp_user, password, fromName: r.smtp_from_name };
+}
+
+/** Remetente dos e-mails da organização: a conta própria, se configurada; senão o da plataforma. */
+export function orgMailer(deps: Deps, c: ChannelConfig, orgName: string): Mailer {
+  return c.smtp ? deps.orgMailer({ ...c.smtp, fromName: c.smtp.fromName || orgName }) : deps.mailer;
 }
 
 /** WhatsApp com envio automático configurado (senão, envio manual pelo painel). */
@@ -59,7 +80,7 @@ export function whatsappAutomatic(c: ChannelConfig): boolean {
 }
 
 export function emailAvailable(deps: Deps, c: ChannelConfig): boolean {
-  return c.emailEnabled && deps.config.mailMode !== 'manual';
+  return c.emailEnabled && (!!c.smtp || deps.config.mailMode !== 'manual');
 }
 
 export interface WaTemplate {

@@ -10,7 +10,7 @@ import { OutboundError, validateOutboundUrl } from '../../lib/http.js';
 import { cleanText, zOptionalDocument, zOptionalEmail, zOptionalPhone, zOptionalText, zText, zUuid } from '../../lib/normalize.js';
 import { TEMPLATE_VARS, chargeValues, renderTemplate, unknownVariables } from '../../lib/template.js';
 import { SEGMENTS } from '../platform/routes.js';
-import { emailAvailable, loadChannels, sendWhatsApp, whatsappAutomatic } from '../channels/service.js';
+import { emailAvailable, loadChannels, orgMailer, sendWhatsApp, whatsappAutomatic } from '../channels/service.js';
 
 const zTemplateBody = (max: number) =>
   zText(5, max).superRefine((v, ctx) => {
@@ -60,6 +60,7 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
         emailEnabled: c.emailEnabled,
         emailAvailable: emailAvailable(deps, c),
         emailReplyTo: c.emailReplyTo,
+        smtp: c.smtp ? { host: c.smtp.host, port: c.smtp.port, user: c.smtp.user, fromName: c.smtp.fromName } : null,
         platformMailMode: deps.config.mailMode,
         // Endereços e token de verificação: somente para o responsável (configuração das integrações).
         ...(isOwner
@@ -194,15 +195,70 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
     return { ok: true, webhookSecret: revealedSecret };
   });
 
+  const zSmtp = z
+    .object({
+      host: z.string().trim().toLowerCase().max(253).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/, 'Servidor SMTP inválido.'),
+      port: z.union([z.literal(465), z.literal(587), z.literal(2525)], { message: 'Use a porta 465, 587 ou 2525.' }),
+      user: z.string().trim().toLowerCase().max(254).email('E-mail inválido.'),
+      /** Em branco mantém a senha já salva. */
+      password: z.string().max(200).optional(),
+      fromName: zOptionalText(80),
+    })
+    .strict();
+
   app.put('/api/settings/email', async (req) => {
     const me = requireOwner(req);
-    const body = parse(z.object({ enabled: z.boolean(), replyTo: zOptionalEmail }).strict(), req.body);
+    const body = parse(z.object({ enabled: z.boolean(), replyTo: zOptionalEmail, smtp: zSmtp.nullable().optional() }).strict(), req.body);
+    const key = deps.config.secretsKey;
+    const current = await loadChannels(deps, me.orgId);
+    let smtp = current.smtp;
+    if (body.smtp === null) smtp = null;
+    else if (body.smtp) {
+      const password = body.smtp.password?.trim() ? body.smtp.password : current.smtp?.user === body.smtp.user ? current.smtp.password : null;
+      if (!password) throw new AppError(422, 'invalid', 'Informe a senha (ou senha de app) do e-mail.');
+      smtp = { host: body.smtp.host, port: body.smtp.port, user: body.smtp.user, password, fromName: body.smtp.fromName };
+    }
     await deps.pools.owner.query(
-      `insert into org_channels (organization_id, email_enabled, email_reply_to) values ($1, $2, $3)
-       on conflict (organization_id) do update set email_enabled = $2, email_reply_to = $3`,
-      [me.orgId, body.enabled, body.replyTo],
+      `insert into org_channels (organization_id, email_enabled, email_reply_to, smtp_host, smtp_port, smtp_user, smtp_password_enc, smtp_from_name)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)
+       on conflict (organization_id) do update set email_enabled = $2, email_reply_to = $3, smtp_host = $4, smtp_port = $5,
+         smtp_user = $6, smtp_password_enc = $7, smtp_from_name = $8`,
+      [
+        me.orgId, body.enabled, body.replyTo,
+        smtp?.host ?? null, smtp?.port ?? null, smtp?.user ?? null,
+        smtp ? encryptSecret(key, smtp.password) : null, smtp?.fromName ?? null,
+      ],
     );
-    await asUser(deps, req, (db) => audit(db, req, 'settings.email', 'organization', me.orgId, me.orgId, { enabled: body.enabled }));
+    await asUser(deps, req, (db) =>
+      audit(db, req, 'settings.email', 'organization', me.orgId, me.orgId, { enabled: body.enabled, ownAccount: !!smtp, host: smtp?.host ?? null }),
+    );
+    return { ok: true };
+  });
+
+  /** Teste da conta de e-mail própria: envia uma mensagem para o endereço informado. */
+  app.post('/api/settings/email/test', async (req) => {
+    const me = requireOwner(req);
+    const body = parse(z.object({ to: zOptionalEmail.pipe(z.string({ message: 'Informe o e-mail.' })) }).strict(), req.body);
+    await deps.limiters.sendNow.consume(`u:${me.id}`);
+    const c = await loadChannels(deps, me.orgId);
+    if (!c.smtp) throw new AppError(409, 'conflict', 'Salve a conta de e-mail antes de testar.');
+    const { rows } = await deps.pools.owner.query<{ name: string }>('select name from organizations where id = $1', [me.orgId]);
+    const name = rows[0]!.name;
+    try {
+      await orgMailer(deps, c, name).send({
+        to: body.to,
+        subject: `Teste do Venceu – ${name}`,
+        text: `✅ A conta de e-mail ${c.smtp.user} está conectada ao Venceu. Os lembretes da ${name} sairão por ela.`,
+      });
+    } catch (e) {
+      const err = e as { code?: string };
+      const msg =
+        e instanceof OutboundError ? e.message
+        : err.code === 'EAUTH' ? 'Usuário ou senha recusados. No Gmail, iCloud e Outlook use uma "senha de app", não a senha normal.'
+        : ['ECONNECTION', 'ETIMEDOUT', 'ESOCKET', 'EDNS'].includes(err.code ?? '') ? 'Não foi possível conectar ao servidor. Confira o servidor e a porta.'
+        : 'Falha ao enviar o e-mail de teste.';
+      throw new AppError(502, 'send_failed', msg);
+    }
     return { ok: true };
   });
 

@@ -5,6 +5,7 @@ import { signValue } from '../../lib/secrets.js';
 import {
   emailAvailable,
   loadChannels,
+  orgMailer,
   sendWhatsAppWithMedia,
   whatsappAutomatic,
   type ChannelConfig,
@@ -39,7 +40,10 @@ export function unsubscribeLink(deps: Deps, customerId: string) {
 /** Erros exibidos no painel: somente mensagens seguras (sem tokens, hosts internos ou pilhas). */
 function safeError(e: unknown) {
   if (e instanceof OutboundError) return e.message.slice(0, 300);
-  const code = (e as { code?: string; responseCode?: number }).responseCode;
+  const err = e as { code?: string; responseCode?: number };
+  if (err.code === 'EAUTH') return 'O servidor de e-mail recusou o usuário ou a senha. Confira em Configurações → E-mail.';
+  if (['ECONNECTION', 'ETIMEDOUT', 'ESOCKET', 'EDNS'].includes(err.code ?? '')) return 'Não foi possível conectar ao servidor de e-mail. Confira o endereço e a porta.';
+  const code = err.responseCode;
   if (code) return `Servidor de e-mail recusou o envio (código ${code}).`;
   return 'Falha no envio. Tente novamente mais tarde.';
 }
@@ -66,7 +70,7 @@ async function sendOne(deps: Deps, m: MessageRow, channels: ChannelConfig) {
     } else {
       if (!emailAvailable(deps, channels)) throw new OutboundError('Envio de e-mail desativado.');
       const unsub = m.customer_id ? unsubscribeLink(deps, m.customer_id) : null;
-      await deps.mailer.send({
+      await orgMailer(deps, channels, m.org_name).send({
         to: m.to_address,
         subject: m.subject || `Mensagem de ${m.org_name}`,
         text:

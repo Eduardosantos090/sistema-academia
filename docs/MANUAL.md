@@ -8,6 +8,14 @@
 5. **Clientes → Novo cliente**: informe WhatsApp/e-mail e marque "Criar assinatura" com o primeiro vencimento.
 6. **Configurações → Equipe**: convide atendentes (perfil Equipe).
 
+## E-mail da sua empresa
+
+Em **Configurações → E-mail**, ligue "Enviar os lembretes pelo meu próprio e-mail" e informe o seu e-mail. O provedor
+(Gmail, Outlook/Hotmail, iCloud, Yahoo, Hostinger, Locaweb, Zoho) é reconhecido sozinho; para outro, informe o servidor SMTP
+e a porta. No Gmail, Outlook, iCloud e Yahoo use uma **senha de app** (a senha normal é recusada) — o passo a passo aparece
+na tela. Salve e use **Enviar teste**. A senha fica guardada criptografada e nunca é exibida de novo. Assim cada empresa
+envia os lembretes do próprio endereço, e o WhatsApp de cada uma é configurado na aba **WhatsApp**.
+
 ## Importar clientes de uma planilha
 Em **Clientes → Importar planilha**: baixe o modelo ou use a sua planilha salva como **CSV** (Excel: Arquivo → Salvar como → CSV).
 Colunas reconhecidas: Nome (obrigatória), WhatsApp/Celular, E-mail, CPF, Plano, Valor, Periodicidade e Vencimento (data ou só o dia do mês).

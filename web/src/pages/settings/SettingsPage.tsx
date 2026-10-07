@@ -19,6 +19,7 @@ interface Settings {
   channels: {
     whatsappMode: WhatsAppMode; whatsappAutomatic: boolean; phoneNumberId: string | null; hasAccessToken: boolean; hasAppSecret: boolean;
     webhookUrl: string | null; hasWebhookSecret: boolean; emailEnabled: boolean; emailAvailable: boolean; emailReplyTo: string | null;
+    smtp: { host: string; port: number; user: string; fromName: string | null } | null;
     platformMailMode: 'smtp' | 'manual' | 'dev'; verifyToken?: string | null; cloudWebhookUrl?: string; inboundWebhookUrl?: string;
   };
 }
@@ -315,32 +316,140 @@ function WhatsAppTab({ s }: { s: Settings }) {
   );
 }
 
+const SMTP_PRESETS = [
+  { id: 'gmail', label: 'Gmail', host: 'smtp.gmail.com', port: 465, domains: ['gmail.com', 'googlemail.com'],
+    help: 'Ative a verificação em duas etapas na Conta Google e crie uma "senha de app" em myaccount.google.com/apppasswords.' },
+  { id: 'outlook', label: 'Outlook / Hotmail', host: 'smtp-mail.outlook.com', port: 587, domains: ['outlook.com', 'hotmail.com', 'live.com', 'msn.com'],
+    help: 'Ative a verificação em duas etapas na conta Microsoft e crie uma "senha de app" em account.microsoft.com/security.' },
+  { id: 'icloud', label: 'iCloud', host: 'smtp.mail.me.com', port: 587, domains: ['icloud.com', 'me.com', 'mac.com'],
+    help: 'Crie uma "senha de app" em appleid.apple.com → Iniciar sessão e segurança → Senhas de app.' },
+  { id: 'yahoo', label: 'Yahoo', host: 'smtp.mail.yahoo.com', port: 465, domains: ['yahoo.com', 'yahoo.com.br'],
+    help: 'Gere uma "senha de app" em login.yahoo.com → Segurança da conta.' },
+  { id: 'hostinger', label: 'Hostinger', host: 'smtp.hostinger.com', port: 465, domains: [], help: 'Use o e-mail e a senha da caixa criada no painel da Hostinger.' },
+  { id: 'locaweb', label: 'Locaweb', host: 'email-ssl.com.br', port: 465, domains: [], help: 'Use o e-mail e a senha da caixa criada no painel da Locaweb.' },
+  { id: 'zoho', label: 'Zoho Mail', host: 'smtp.zoho.com', port: 465, domains: ['zohomail.com'], help: 'Use uma senha específica de aplicativo do Zoho.' },
+  { id: 'outro', label: 'Outro provedor', host: '', port: 465, domains: [], help: 'Informe o servidor SMTP e a porta indicados pelo seu provedor de e-mail.' },
+] as const;
+type PresetId = (typeof SMTP_PRESETS)[number]['id'];
+
+function presetFor(host: string): PresetId {
+  return SMTP_PRESETS.find((p) => p.host && p.host === host)?.id ?? 'outro';
+}
+
 function EmailTab({ s }: { s: Settings }) {
   const qc = useQueryClient();
   const toast = useToast();
   const c = s.channels;
   const [enabled, setEnabled] = useState(c.emailEnabled);
   const [replyTo, setReplyTo] = useState(c.emailReplyTo ?? '');
+  const [own, setOwn] = useState(!!c.smtp);
+  const [preset, setPreset] = useState<PresetId>(c.smtp ? presetFor(c.smtp.host) : 'gmail');
+  const [user, setUser] = useState(c.smtp?.user ?? '');
+  const [password, setPassword] = useState('');
+  const [host, setHost] = useState(c.smtp?.host ?? 'smtp.gmail.com');
+  const [port, setPort] = useState(c.smtp?.port ?? 465);
+  const [fromName, setFromName] = useState(c.smtp?.fromName ?? s.organization.name);
+  const [testTo, setTestTo] = useState(s.organization.contactEmail ?? '');
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const p = SMTP_PRESETS.find((x) => x.id === preset)!;
+
+  const pickPreset = (id: PresetId) => {
+    setPreset(id);
+    const np = SMTP_PRESETS.find((x) => x.id === id)!;
+    if (np.host) { setHost(np.host); setPort(np.port); }
+  };
+  const onUser = (v: string) => {
+    setUser(v);
+    const domain = v.split('@')[1]?.toLowerCase();
+    const match = SMTP_PRESETS.find((x) => (x.domains as readonly string[]).includes(domain ?? ''));
+    if (match && match.id !== preset) pickPreset(match.id);
+  };
+
   const m = useMutation({
-    mutationFn: () => api.put('/api/settings/email', { enabled, replyTo: replyTo || null }),
+    mutationFn: () =>
+      api.put('/api/settings/email', {
+        enabled,
+        replyTo: replyTo || null,
+        smtp: own ? { host, port, user, password: password || undefined, fromName: fromName || null } : null,
+      }),
     onSuccess: () => {
+      setErrors({});
+      setPassword('');
       void qc.invalidateQueries({ queryKey: ['settings'] });
-      toast.success('Configuração de e-mail salva.');
+      toast.success(own ? 'Conta de e-mail conectada. Faça um teste de envio.' : 'Configuração de e-mail salva.');
     },
+    onError: (e) => {
+      setErrors(Object.fromEntries(Object.entries(fieldErrors(e)).map(([k, v]) => [k.replace(/^smtp\./, ''), v])));
+      toast.error(e);
+    },
+  });
+  const test = useMutation({
+    mutationFn: () => api.post('/api/settings/email/test', { to: testTo }),
+    onSuccess: () => toast.success(`E-mail de teste enviado para ${testTo}. Confira a caixa de entrada (e o spam).`),
     onError: (e) => toast.error(e),
   });
+
   return (
-    <section className="card card-body stack" style={{ maxWidth: 720 }}>
-      <h2>Lembretes por e-mail</h2>
-      {c.platformMailMode === 'manual' && (
-        <Alert kind="warning">O servidor de e-mail da plataforma não está configurado: no momento os lembretes saem somente por WhatsApp.</Alert>
+    <div className="stack" style={{ maxWidth: 720 }}>
+      <section className="card card-body stack">
+        <h2>Lembretes por e-mail</h2>
+        {!c.smtp && c.platformMailMode === 'manual' && (
+          <Alert kind="warning">Conecte o e-mail da sua empresa abaixo para os lembretes por e-mail serem enviados automaticamente.</Alert>
+        )}
+        <Switch checked={enabled} onChange={(e) => setEnabled(e.target.checked)} label="Enviar lembretes por e-mail (conforme as regras)" />
+        <TextField label="Responder para" value={replyTo} onChange={(e) => setReplyTo(e.target.value)} placeholder={c.smtp?.user ?? s.organization.contactEmail ?? 'financeiro@suaempresa.com.br'}
+          hint="Quando o cliente responder o e-mail, a resposta vai para este endereço." />
+        <p className="muted small" style={{ margin: 0 }}>Todo e-mail inclui um link de descadastro (exigência de boas práticas e da LGPD).</p>
+      </section>
+
+      <section className="card card-body stack">
+        <h2>E-mail da sua empresa</h2>
+        <Switch checked={own} onChange={(e) => setOwn(e.target.checked)} label="Enviar os lembretes pelo meu próprio e-mail"
+          hint="Seus clientes recebem as mensagens do endereço da sua empresa, e não de um remetente genérico." />
+        {own && (
+          <>
+            <TextField label="Seu e-mail" type="email" value={user} onChange={(e) => onUser(e.target.value)} error={errors.user} placeholder="financeiro@suaempresa.com.br" autoComplete="off" />
+            <SelectField label="Provedor" value={preset} onChange={(e) => pickPreset(e.target.value as PresetId)}>
+              {SMTP_PRESETS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+            </SelectField>
+            <Alert kind="info">{p.help}</Alert>
+            <TextField label={preset === 'hostinger' || preset === 'locaweb' || preset === 'outro' ? 'Senha do e-mail' : 'Senha de app'} type="password" value={password}
+              onChange={(e) => setPassword(e.target.value)} error={errors.password} autoComplete="new-password"
+              placeholder={c.smtp ? '•••••••• (em branco mantém a senha salva)' : ''} hint="Fica guardada criptografada e nunca é exibida novamente." />
+            {preset === 'outro' && (
+              <div className="row" style={{ alignItems: 'flex-start' }}>
+                <div style={{ flex: 2, minWidth: 200 }}>
+                  <TextField label="Servidor SMTP" value={host} onChange={(e) => setHost(e.target.value)} error={errors.host} placeholder="smtp.seuprovedor.com.br" />
+                </div>
+                <div style={{ flex: 1, minWidth: 120 }}>
+                  <SelectField label="Porta" value={String(port)} onChange={(e) => setPort(Number(e.target.value))} error={errors.port}>
+                    <option value="465">465 (SSL)</option>
+                    <option value="587">587 (STARTTLS)</option>
+                    <option value="2525">2525</option>
+                  </SelectField>
+                </div>
+              </div>
+            )}
+            <TextField label="Nome do remetente" value={fromName} onChange={(e) => setFromName(e.target.value)} error={errors.fromName} maxLength={80}
+              hint="Como aparece na caixa de entrada do cliente." />
+          </>
+        )}
+        <div className="form-actions"><Button variant="primary" loading={m.isPending} onClick={() => m.mutate()}>Salvar</Button></div>
+      </section>
+
+      {c.smtp && (
+        <section className="card card-body stack">
+          <h2>Testar envio</h2>
+          <p className="muted small" style={{ margin: 0 }}>Conectado como <strong>{c.smtp.user}</strong>.</p>
+          <div className="row" style={{ alignItems: 'flex-end' }}>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <TextField label="Enviar e-mail de teste para" type="email" value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="voce@exemplo.com" />
+            </div>
+            <Button loading={test.isPending} disabled={!testTo} onClick={() => test.mutate()}><Icon name="send" /> Enviar teste</Button>
+          </div>
+        </section>
       )}
-      <Switch checked={enabled} onChange={(e) => setEnabled(e.target.checked)} label="Enviar lembretes por e-mail (conforme as regras)" />
-      <TextField label="Responder para" value={replyTo} onChange={(e) => setReplyTo(e.target.value)} placeholder={s.organization.contactEmail ?? 'financeiro@suaempresa.com.br'}
-        hint="Quando o cliente responder o e-mail, a resposta vai para este endereço." />
-      <p className="muted small" style={{ margin: 0 }}>Todo e-mail inclui um link de descadastro (exigência de boas práticas e da LGPD).</p>
-      <div className="form-actions"><Button variant="primary" loading={m.isPending} onClick={() => m.mutate()}>Salvar</Button></div>
-    </section>
+    </div>
   );
 }
 

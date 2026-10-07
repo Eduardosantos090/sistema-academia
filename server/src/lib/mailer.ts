@@ -1,6 +1,9 @@
+import dns from 'node:dns/promises';
+import net from 'node:net';
 import nodemailer from 'nodemailer';
 import type SMTPTransport from 'nodemailer/lib/smtp-transport/index.js';
 import type { Config } from '../config.js';
+import { isBlockedAddress, OutboundError } from './http.js';
 
 export interface MailMessage {
   to: string;
@@ -67,3 +70,60 @@ export function createMailer(config: Config): Mailer {
   }
   return new MemoryMailer();
 }
+
+/** Conta de e-mail própria de uma organização. */
+export interface OrgSmtp {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  fromName: string;
+}
+
+export type OrgMailerFactory = (smtp: OrgSmtp) => Mailer;
+
+/** Nome de exibição seguro para o cabeçalho From (sem aspas, quebras ou sinais de endereço). */
+export function fromHeader(name: string, address: string) {
+  const clean = name.replace(/[\r\n"<>\\]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+  return clean ? `"${clean}" <${address}>` : address;
+}
+
+/**
+ * Envio pela conta da organização. O host é informado pelo cliente: resolve o
+ * DNS a cada envio, recusa endereços internos (SSRF) e conecta direto no IP
+ * verificado, validando o certificado pelo nome original.
+ */
+export class OrgSmtpMailer implements Mailer {
+  constructor(private readonly smtp: OrgSmtp) {}
+  async send(msg: MailMessage) {
+    const { host, port, user, password, fromName } = this.smtp;
+    const addrs = net.isIP(host) ? [{ address: host }] : await dns.lookup(host, { all: true }).catch(() => []);
+    if (!addrs.length) throw new OutboundError('Servidor de e-mail não encontrado. Confira o endereço SMTP.');
+    if (addrs.some((a) => isBlockedAddress(a.address))) throw new OutboundError('Servidor de e-mail não permitido.');
+    const transport = nodemailer.createTransport({
+      host: addrs[0]!.address,
+      port,
+      secure: port === 465,
+      requireTLS: port !== 465,
+      tls: { servername: host, minVersion: 'TLSv1.2' },
+      auth: { user, pass: password.replace(/\s+/g, '') },
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 15000,
+    });
+    try {
+      await transport.sendMail({
+        from: fromHeader(fromName, user),
+        to: msg.to,
+        subject: msg.subject,
+        text: msg.text,
+        ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
+        ...(msg.unsubscribeUrl ? { list: { unsubscribe: msg.unsubscribeUrl } } : {}),
+      });
+    } finally {
+      transport.close();
+    }
+  }
+}
+
+export const createOrgMailer: OrgMailerFactory = (smtp) => new OrgSmtpMailer(smtp);

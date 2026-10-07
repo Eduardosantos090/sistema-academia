@@ -2,7 +2,7 @@ import type { FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Pools, Db, DbInfo } from './db.js';
 import { withUser } from './db.js';
-import type { Mailer } from './mailer.js';
+import type { Mailer, OrgMailerFactory } from './mailer.js';
 import type { Limiters } from './rate-limit.js';
 import type { HttpFetch } from './http.js';
 import { forbidden, unauthorized } from './errors.js';
@@ -25,6 +25,8 @@ export interface Deps {
   config: Config;
   pools: Pools;
   mailer: Mailer;
+  /** Envio pela conta de e-mail da própria organização. Substituível nos testes. */
+  orgMailer: OrgMailerFactory;
   dbInfo?: DbInfo;
   limiters: Limiters;
   /** Cliente HTTP de saída (WhatsApp/webhooks). Substituível nos testes. */

@@ -297,3 +297,67 @@ describe('correções da auditoria de segurança', () => {
     expect(r.statusCode).toBe(422);
   });
 });
+
+describe('e-mail próprio da organização', () => {
+  it('lembretes saem pela conta de e-mail do cliente; senha nunca volta para o navegador', async () => {
+    const manual = ctx;
+    const { owner, orgId } = await createOrg(manual, platform);
+    const staff = (await inviteStaff(manual, owner)).agent;
+    // Plataforma sem servidor de e-mail (modo manual): só a conta própria envia.
+    const cfg = manual.deps.config as { mailMode: string };
+    const previous = cfg.mailMode;
+    cfg.mailMode = 'manual';
+    try {
+      const cid = await createCustomer(owner, { name: 'Carla Email', phone: null, email: 'carla@example.test' });
+      const ch = (await owner.post('/api/charges', { customerId: cid, description: 'Mensalidade', amountCents: 9900, dueDate: await orgToday(manual, orgId, 1) })).json().id;
+
+      // Sem conta própria e com a plataforma em modo manual: e-mail indisponível.
+      expect((await owner.post(`/api/charges/${ch}/send`, { channel: 'email' })).statusCode).toBe(409);
+
+      const smtp = { host: 'smtp.gmail.com', port: 465, user: 'Academia@Gmail.com', password: 'abcd efgh ijkl mnop', fromName: 'Academia Força' };
+      expect((await staff.put('/api/settings/email', { enabled: true, replyTo: null, smtp })).statusCode).toBe(403);
+      expect((await owner.put('/api/settings/email', { enabled: true, replyTo: null, smtp: { ...smtp, host: 'localhost' } })).statusCode).toBe(422);
+      expect((await owner.put('/api/settings/email', { enabled: true, replyTo: null, smtp: { ...smtp, port: 25 } })).statusCode).toBe(422);
+      expect((await owner.put('/api/settings/email', { enabled: true, replyTo: null, smtp: { ...smtp, password: '' } })).statusCode).toBe(422);
+      expect((await owner.put('/api/settings/email', { enabled: true, replyTo: null, smtp })).statusCode).toBe(200);
+
+      const { rows } = await manual.owner.query('select smtp_user, smtp_password_enc from org_channels where organization_id = $1', [orgId]);
+      expect(rows[0].smtp_user).toBe('academia@gmail.com');
+      expect(rows[0].smtp_password_enc).not.toContain('abcd');
+      const s = json(await owner.get('/api/settings'));
+      expect(s.channels.emailAvailable).toBe(true);
+      expect(s.channels.smtp).toEqual({ host: 'smtp.gmail.com', port: 465, user: 'academia@gmail.com', fromName: 'Academia Força' });
+      expect(JSON.stringify(s)).not.toContain('abcd');
+
+      // Salvar de novo sem senha mantém a senha.
+      expect((await owner.put('/api/settings/email', { enabled: true, replyTo: 'financeiro@academia.test', smtp: { ...smtp, password: undefined } })).statusCode).toBe(200);
+
+      expect((await owner.post(`/api/charges/${ch}/send`, { channel: 'email' })).statusCode).toBe(200);
+      await dispatchPending(manual.deps, { deadline: Date.now() + 5000 });
+      const sent = manual.orgOutbox.find((m) => m.msg.to === 'carla@example.test')!;
+      expect(sent.smtp).toMatchObject({ host: 'smtp.gmail.com', port: 465, user: 'academia@gmail.com', password: 'abcd efgh ijkl mnop', fromName: 'Academia Força' });
+      expect(sent.msg.replyTo).toBe('financeiro@academia.test');
+      expect(sent.msg.text).toMatch(/\/descadastrar#t=/);
+      expect(manual.mailer.outbox.some((m) => m.to === 'carla@example.test')).toBe(false);
+      const st = await manual.owner.query('select status from messages where customer_id = $1', [cid]);
+      expect(st.rows[0].status).toBe('enviada');
+
+      expect((await owner.post('/api/settings/email/test', { to: 'dono@academia.test' })).statusCode).toBe(200);
+      expect(manual.orgOutbox.some((m) => m.msg.to === 'dono@academia.test')).toBe(true);
+
+      // Desconectar volta ao remetente da plataforma (aqui, indisponível).
+      expect((await owner.put('/api/settings/email', { enabled: true, replyTo: null, smtp: null })).statusCode).toBe(200);
+      expect(json(await owner.get('/api/settings')).channels.emailAvailable).toBe(false);
+    } finally {
+      cfg.mailMode = previous;
+    }
+  });
+
+  it('conta de e-mail apontando para endereço interno é recusada no envio (SSRF)', async () => {
+    const { OrgSmtpMailer } = await import('../src/lib/mailer.js');
+    for (const host of ['127.0.0.1', '169.254.169.254', '10.0.0.5']) {
+      const m = new OrgSmtpMailer({ host, port: 587, user: 'a@b.test', password: 'x', fromName: 'X' });
+      await expect(m.send({ to: 'c@d.test', subject: 's', text: 't' })).rejects.toThrow(/não permitido/);
+    }
+  });
+});

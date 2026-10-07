@@ -3,7 +3,7 @@ import type pg from 'pg';
 import { loadConfig } from '../src/config.js';
 import { createDeps } from '../src/deps.js';
 import { buildApp } from '../src/app.js';
-import { MemoryMailer } from '../src/lib/mailer.js';
+import { MemoryMailer, type MailMessage, type OrgSmtp } from '../src/lib/mailer.js';
 import type { Deps } from '../src/lib/context.js';
 import type { HttpRequest, HttpResult } from '../src/lib/http.js';
 import { newToken, sha256 } from '../src/lib/crypto.js';
@@ -23,6 +23,8 @@ export interface TestCtx {
   app: FastifyInstance;
   deps: Deps;
   mailer: MemoryMailer;
+  /** E-mails enviados pelas contas próprias das organizações. */
+  orgOutbox: { smtp: OrgSmtp; msg: MailMessage }[];
   http: FakeHttp;
   owner: pg.Pool;
   close: () => Promise<void>;
@@ -32,11 +34,17 @@ export async function setupApp(extra: Record<string, string> = {}): Promise<Test
   const config = loadConfig({ ...process.env, ...TEST_ENV, ...extra });
   const mailer = new MemoryMailer();
   const http = new FakeHttp();
-  const deps = await createDeps(config, { mailer, fetch: http.fetch });
+  const orgOutbox: TestCtx['orgOutbox'] = [];
+  const orgMailer = (smtp: OrgSmtp) => ({
+    send: async (msg: MailMessage) => {
+      orgOutbox.push({ smtp, msg });
+    },
+  });
+  const deps = await createDeps(config, { mailer, orgMailer, fetch: http.fetch });
   const app = await buildApp(deps);
   await app.ready();
   return {
-    app, deps, mailer, http, owner: deps.pools.owner,
+    app, deps, mailer, orgOutbox, http, owner: deps.pools.owner,
     close: async () => {
       await app.close();
       await deps.pools.app.end();
