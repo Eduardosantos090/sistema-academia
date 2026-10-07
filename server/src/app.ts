@@ -94,12 +94,15 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     const origin = req.headers.origin;
     if (!origin || req.url.startsWith('/api/webhooks/')) return;
     const self = new URL(config.APP_URL).origin;
-    const allowed = origin === self || config.corsOrigins.includes(origin);
+    // Mesmo site que atende a requisição (ex.: domínio próprio e endereço .netlify.app do mesmo site).
+    const host = req.headers.host;
+    const sameHost = !!host && origin === `${config.secureCookies ? 'https' : new URL(config.APP_URL).protocol.slice(0, -1)}://${host}`;
+    const allowed = origin === self || sameHost || config.corsOrigins.includes(origin);
     if (!allowed) {
       if (req.url.startsWith('/api/')) throw forbidden('Origem não permitida.');
       return;
     }
-    if (origin !== self) {
+    if (origin !== self && !sameHost) {
       reply.header('Access-Control-Allow-Origin', origin);
       reply.header('Access-Control-Allow-Credentials', 'true');
       reply.header('Vary', 'Origin');

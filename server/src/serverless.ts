@@ -14,6 +14,12 @@ let ready: Promise<{ app: FastifyInstance; deps: Deps }> | null = null;
 
 function init() {
   ready ??= (async () => {
+    // No Netlify, URL é o endereço principal do site. Usado quando APP_URL não foi definido
+    // ou ficou com o valor de exemplo.
+    const appUrl = process.env.APP_URL?.trim() ?? '';
+    if ((!appUrl || /TROQUE|SEU-SITE|exemplo/i.test(appUrl)) && process.env.URL?.startsWith('https://')) {
+      process.env.APP_URL = process.env.URL;
+    }
     const config = loadConfig();
     const deps = await createDeps(config);
     const app = await buildApp(deps);
