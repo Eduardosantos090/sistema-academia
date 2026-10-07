@@ -1,12 +1,14 @@
 import type { Deps } from '../../lib/context.js';
 import { chargeValues, renderTemplate, variablesInOrder, type OrgPaymentInfo } from '../../lib/template.js';
 import { emailAvailable, loadChannels, whatsappAutomatic } from '../channels/service.js';
+import { effectivePaymentLink } from '../payments/service.js';
 
 interface OrgClock extends OrgPaymentInfo {
   id: string;
   send_hour: number;
   local_hour: number;
   today: string;
+  online_pay: boolean;
 }
 
 interface DueRow {
@@ -24,6 +26,7 @@ interface DueRow {
   amount_cents: number;
   due_date: string;
   payment_link: string | null;
+  pay_token: string;
   customer_id: string;
   name: string;
   email: string | null;
@@ -43,7 +46,7 @@ const QUIET_FROM_HOUR = 21;
  */
 export async function queueReminders(deps: Deps, onlyOrg?: string) {
   const { rows: orgs } = await deps.pools.owner.query<OrgClock>(
-    `select o.id, o.name, o.pix_key, o.payment_instructions, o.contact_phone, o.send_hour,
+    `select o.id, o.name, o.pix_key, o.payment_instructions, o.contact_phone, o.send_hour, o.online_pay,
             extract(hour from now() at time zone o.timezone)::int as local_hour,
             to_char((now() at time zone o.timezone)::date, 'YYYY-MM-DD') as today
        from organizations o
@@ -59,7 +62,7 @@ export async function queueReminders(deps: Deps, onlyOrg?: string) {
     const { rows } = await deps.pools.owner.query<DueRow>(
       `select r.id as rule_id, r.offset_days, r.send_whatsapp, r.send_email,
               t.body, t.subject, t.wa_template_name, t.wa_template_lang, t.media_id,
-              c.id as charge_id, c.description, c.amount_cents, to_char(c.due_date, 'YYYY-MM-DD') as due_date, c.payment_link,
+              c.id as charge_id, c.description, c.amount_cents, to_char(c.due_date, 'YYYY-MM-DD') as due_date, c.payment_link, c.pay_token,
               cu.id as customer_id, cu.name, cu.email, cu.phone, cu.whatsapp_opt_in, cu.email_opt_in
          from reminder_rules r
          join message_templates t on t.id = r.template_id
@@ -73,7 +76,7 @@ export async function queueReminders(deps: Deps, onlyOrg?: string) {
       [org.id, org.today],
     );
     for (const r of rows) {
-      const values = chargeValues(org, r, r, org.today);
+      const values = chargeValues(org, r, { ...r, payment_link: effectivePaymentLink(deps, { ...r, online_pay: org.online_pay }) }, org.today);
       const body = renderTemplate(r.body, values);
       const subject = r.subject ? renderTemplate(r.subject, values).slice(0, 150) : null;
       const targets: { channel: 'whatsapp' | 'email'; to: string; status: 'pendente' | 'manual' }[] = [];

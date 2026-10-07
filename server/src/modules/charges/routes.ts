@@ -14,7 +14,8 @@ import { csvDate, csvDateTime, csvMoney, toCsv } from '../../lib/csv.js';
 const CHARGE_COLS = `ch.id, ch.description, ch.amount_cents as "amountCents", to_char(ch.due_date, 'YYYY-MM-DD') as "dueDate",
   ch.status, ch.paid_at as "paidAt", ch.paid_amount_cents as "paidAmountCents", ch.payment_method as "paymentMethod",
   ch.payment_link as "paymentLink", ch.reported_paid_at as "reportedPaidAt", ch.notes, ch.subscription_id as "subscriptionId",
-  ch.created_at as "createdAt",
+  ch.created_at as "createdAt", ch.pay_token as "payToken",
+  (select o.online_pay from organizations o where o.id = ch.organization_id) as "onlinePay",
   (ch.status = 'aberta' and ch.due_date < app.org_today(ch.organization_id)) as "overdue",
   (app.org_today(ch.organization_id) - ch.due_date) as "daysLate",
   cu.id as "customerId", cu.name as "customerName", cu.phone as "customerPhone", cu.email as "customerEmail"`;

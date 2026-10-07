@@ -1,6 +1,7 @@
 import type { Deps } from './lib/context.js';
 import { queueReminders } from './modules/automation/reminders.js';
 import { dispatchPending } from './modules/automation/dispatch.js';
+import { pollOnlinePayments } from './modules/payments/service.js';
 
 /**
  * Rotina periódica (a cada minuto): gera as cobranças recorrentes das
@@ -34,6 +35,8 @@ export async function runMaintenance(deps: Deps, budgetMs = 20_000) {
   }
   const { rows } = await deps.pools.owner.query<{ n: number }>('select app.generate_charges(null, 30) as n');
   const queued = await queueReminders(deps);
+  // PIX online: confere pagamentos pendentes (caso algum aviso do provedor não tenha chegado).
+  const pix = await pollOnlinePayments(deps).catch(() => ({ checked: 0, paid: 0 }));
   const sent = await dispatchPending(deps, { deadline });
-  return { chargesCreated: rows[0]!.n, queued, ...sent };
+  return { chargesCreated: rows[0]!.n, queued, pixPaid: pix.paid, ...sent };
 }

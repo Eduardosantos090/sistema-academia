@@ -427,3 +427,10 @@ table.table { width: 100%; border-collapse: collapse; }
 @keyframes rec { 50% { opacity: .35; } }
 .chat-compose { flex-wrap: wrap; }
 .chat-compose .textarea { flex: 1; min-width: 180px; }
+
+/* Página pública de pagamento (PIX) */
+.pay-summary { text-align: center; padding: 4px 0 8px; }
+.pay-amount { font-size: 2.2rem; font-weight: 800; letter-spacing: -0.02em; color: var(--text); margin: 4px 0; }
+.pay-qr { display: block; margin: 0 auto; width: 240px; max-width: 100%; height: auto; background: #fff; padding: 10px; border-radius: 14px; }
+.pay-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; word-break: break-all; resize: none; }
+.pay-steps { margin: 0; padding-left: 20px; display: grid; gap: 4px; }

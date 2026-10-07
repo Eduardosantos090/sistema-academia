@@ -124,6 +124,12 @@ export function ChargesPage() {
                                 action: () => api.post(`/api/charges/${ch.id}/dismiss-report`),
                               })}>Não encontrei</Button>
                             )}
+                            {ch.onlinePay && ch.payToken && (
+                              <Button size="sm" variant="ghost" className="btn-icon" title="Copiar link de pagamento (PIX)" aria-label={`Copiar link de pagamento de ${ch.customerName}`}
+                                onClick={() => void navigator.clipboard?.writeText(`${window.location.origin}/pagar/${ch.payToken}`).then(() => toast.success('Link de pagamento copiado.'))}>
+                                <Icon name="copy" size={16} />
+                              </Button>
+                            )}
                             <Button size="sm" variant="ghost" className="btn-icon" title="Enviar lembrete" aria-label={`Enviar lembrete para ${ch.customerName}`} onClick={() => setSend(ch)}>
                               <Icon name="send" size={16} />
                             </Button>

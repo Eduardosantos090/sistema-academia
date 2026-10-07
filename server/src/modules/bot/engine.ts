@@ -218,16 +218,18 @@ export function decide(
   }
 }
 
-async function loadContext(db: Db, orgId: string, customerIds: string[]) {
+async function loadContext(db: Db, orgId: string, customerIds: string[], appUrl: string) {
   const charges = customerIds.length
     ? (
         await db.query<OpenCharge>(
           `select c.id, cu.name as customer_name, c.description, c.amount_cents,
-                  to_char(c.due_date, 'YYYY-MM-DD') as due_date, c.payment_link
-             from charges c join customers cu on cu.id = c.customer_id
+                  to_char(c.due_date, 'YYYY-MM-DD') as due_date,
+                  -- Link informado na cobrança ou, com PIX online, a página de pagamento do Venceu.
+                  coalesce(c.payment_link, case when o.online_pay then $3 || '/pagar/' || c.pay_token end) as payment_link
+             from charges c join customers cu on cu.id = c.customer_id join organizations o on o.id = c.organization_id
             where c.organization_id = $1 and c.customer_id = any($2::uuid[]) and c.status = 'aberta'
             order by c.due_date limit 20`,
-          [orgId, customerIds],
+          [orgId, customerIds, appUrl],
         )
       ).rows
     : [];
@@ -262,7 +264,7 @@ export async function simulate(deps: Deps, org: BotOrg, customerId: string | nul
     const customers = customerId
       ? (await db.query<BotCustomer>('select id, name from customers where id = $1 and organization_id = $2', [customerId, org.id])).rows
       : [];
-    const ctx = await loadContext(db, org.id, customers.map((c) => c.id));
+    const ctx = await loadContext(db, org.id, customers.map((c) => c.id), deps.config.appUrl);
     return decide(org, customers, ctx.charges, ctx.answers, text);
   });
 }
@@ -325,7 +327,7 @@ export async function handleIncoming(
       return { replies: [], media: null, conversationId: conv.id, intent: null };
     }
 
-    const ctx = await loadContext(db, org.id, customers.map((c) => c.id));
+    const ctx = await loadContext(db, org.id, customers.map((c) => c.id), deps.config.appUrl);
     const d = decide(org, customers, ctx.charges, ctx.answers, text);
     const ids = customers.map((c) => c.id);
 

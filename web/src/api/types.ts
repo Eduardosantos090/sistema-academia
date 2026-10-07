@@ -65,6 +65,8 @@ export interface Charge {
   paidAmountCents: number | null;
   paymentMethod: string | null;
   paymentLink: string | null;
+  payToken?: string;
+  onlinePay?: boolean;
   reportedPaidAt: string | null;
   notes?: string | null;
   subscriptionId?: string | null;

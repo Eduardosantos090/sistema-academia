@@ -7,6 +7,7 @@ import { mediaUrl } from '../../lib/media.js';
 import { chargeValues, renderTemplate, variablesInOrder } from '../../lib/template.js';
 import { dispatchMessage } from '../automation/dispatch.js';
 import { emailAvailable, loadChannels, whatsappAutomatic, type ChannelConfig } from '../channels/service.js';
+import { effectivePaymentLink } from '../payments/service.js';
 
 type Kind = 'lembrete' | 'vencimento' | 'atraso' | 'pagamento_confirmado' | 'personalizada';
 
@@ -16,6 +17,8 @@ interface ChargeCtx {
   amount_cents: number;
   due_date: string;
   payment_link: string | null;
+  pay_token: string;
+  online_pay: boolean;
   paid_amount_cents: number | null;
   status: string;
   customer_id: string;
@@ -65,7 +68,7 @@ export async function sendChargeMessage(
   const prepared = await asUser(deps, req, async (db) => {
     const { rows } = await db.query<ChargeCtx>(
       `select ch.id as charge_id, ch.description, ch.amount_cents, to_char(ch.due_date, 'YYYY-MM-DD') as due_date,
-              ch.payment_link, ch.paid_amount_cents, ch.status,
+              ch.payment_link, ch.pay_token, o.online_pay, ch.paid_amount_cents, ch.status,
               cu.id as customer_id, cu.name, cu.email, cu.phone, cu.whatsapp_opt_in, cu.email_opt_in,
               o.name as org_name, o.pix_key, o.payment_instructions, o.contact_phone,
               to_char(app.org_today(o.id), 'YYYY-MM-DD') as today
@@ -111,7 +114,7 @@ export async function sendChargeMessage(
     if (!t) throw notFound('Modelo de mensagem não encontrado.');
 
     const org = { name: c.org_name, pix_key: c.pix_key, payment_instructions: c.payment_instructions, contact_phone: c.contact_phone };
-    const values = chargeValues(org, c, c, c.today);
+    const values = chargeValues(org, c, { ...c, payment_link: effectivePaymentLink(deps, c) }, c.today);
     const body = renderTemplate(t.body, values).slice(0, 4096);
     const subject = t.subject ? renderTemplate(t.subject, values).slice(0, 150) : `Mensagem de ${c.org_name}`;
     const waTemplate =

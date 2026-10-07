@@ -16,6 +16,20 @@ e a porta. No Gmail, Outlook, iCloud e Yahoo use uma **senha de app** (a senha n
 na tela. Salve e use **Enviar teste**. A senha fica guardada criptografada e nunca é exibida de novo. Assim cada empresa
 envia os lembretes do próprio endereço, e o WhatsApp de cada uma é configurado na aba **WhatsApp**.
 
+## PIX automático (AbacatePay)
+
+Em **Configurações → PIX automático**, cole a chave da API da AbacatePay (painel da AbacatePay → Integração → Chaves de API)
+e clique em **Ligar PIX automático**. Comece com uma chave de **teste** (`abc_dev_…`) para validar o fluxo sem cobrar ninguém.
+
+- Cada lembrete passa a levar um **link de pagamento** (variáveis `{{link_pagamento}}` e `{{instrucoes_pagamento}}`). O link abre
+  uma página com QR Code e PIX copia e cola, gerados na hora pela AbacatePay. O botão de copiar link também aparece em **Cobranças**.
+- Quando o cliente paga, a cobrança é baixada sozinha, os lembretes pendentes dela são cancelados e o cliente recebe a confirmação.
+- **Aviso de pagamento (webhook):** no painel da AbacatePay, em Integração → Webhooks, cadastre a URL e o segredo mostrados na tela.
+  Mesmo sem o webhook, o Venceu confere os PIX pendentes a cada poucos minutos.
+- A baixa só acontece depois de o Venceu consultar a AbacatePay com a sua chave — um aviso falso não dá baixa em nada.
+- No modo de teste, a página de pagamento mostra **Simular pagamento**, para conferir o fluxo completo.
+- Na empresa de cobrança da plataforma (Eduardo), a baixa de uma mensalidade renova automaticamente o acesso da academia.
+
 ## Importar clientes de uma planilha
 Em **Clientes → Importar planilha**: baixe o modelo ou use a sua planilha salva como **CSV** (Excel: Arquivo → Salvar como → CSV).
 Colunas reconhecidas: Nome (obrigatória), WhatsApp/Celular, E-mail, CPF, Plano, Valor, Periodicidade e Vencimento (data ou só o dia do mês).

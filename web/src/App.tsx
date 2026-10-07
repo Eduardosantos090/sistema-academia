@@ -5,6 +5,7 @@ import { Loading } from './components/ui';
 import { AppLayout } from './layout/AppLayout';
 import { LandingPage } from './pages/public/LandingPage';
 import { UnsubscribePage } from './pages/public/UnsubscribePage';
+import { PayPage } from './pages/public/PayPage';
 import { LoginPage } from './pages/auth/LoginPage';
 import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/auth/ResetPasswordPage';
@@ -68,6 +69,7 @@ export function App() {
       <Route path="/redefinir-senha" element={<ResetPasswordPage />} />
       <Route path="/convite" element={<AcceptInvitePage />} />
       <Route path="/descadastrar" element={<UnsubscribePage />} />
+      <Route path="/pagar/:token" element={<PayPage />} />
       <Route
         path="/app"
         element={

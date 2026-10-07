@@ -82,6 +82,7 @@ export interface Limiters {
   sendNow: RateLimiter;
   publicIp: RateLimiter;
   mediaIp: RateLimiter;
+  payIp: RateLimiter;
 }
 
 export function createLimiters(store: 'memory' | 'postgres' = 'memory', pool?: pg.Pool): Limiters {
@@ -103,5 +104,7 @@ export function createLimiters(store: 'memory' | 'postgres' = 'memory', pool?: p
     publicIp: make('publicIp', 30, 15 * min),
     // Downloads de anexos (servidores do WhatsApp e navegadores).
     mediaIp: make('mediaIp', 600, 10 * min),
+    // Página pública de pagamento (abrir e conferir o PIX).
+    payIp: make('payIp', 120, 10 * min),
   };
 }

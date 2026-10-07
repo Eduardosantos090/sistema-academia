@@ -24,7 +24,7 @@ interface Settings {
   };
 }
 
-type Tab = 'empresa' | 'cobranca' | 'whatsapp' | 'email' | 'equipe';
+type Tab = 'empresa' | 'cobranca' | 'pix' | 'whatsapp' | 'email' | 'equipe';
 
 export function SettingsPage() {
   const { isOwner } = useAuth();
@@ -38,6 +38,7 @@ export function SettingsPage() {
     { id: 'cobranca', label: 'Cobrança e assistente' },
     ...(isOwner
       ? [
+          { id: 'pix' as const, label: 'PIX automático' },
           { id: 'whatsapp' as const, label: 'WhatsApp' },
           { id: 'email' as const, label: 'E-mail' },
           { id: 'equipe' as const, label: 'Equipe' },
@@ -51,6 +52,7 @@ export function SettingsPage() {
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
         {tab === 'empresa' && <CompanyTab s={q.data} canEdit={isOwner} />}
         {tab === 'cobranca' && <BillingTab s={q.data} canEdit={isOwner} />}
+        {tab === 'pix' && isOwner && <OnlinePayTab />}
         {tab === 'whatsapp' && isOwner && <WhatsAppTab s={q.data} />}
         {tab === 'email' && isOwner && <EmailTab s={q.data} />}
         {tab === 'equipe' && isOwner && <TeamTab />}
@@ -334,6 +336,74 @@ type PresetId = (typeof SMTP_PRESETS)[number]['id'];
 
 function presetFor(host: string): PresetId {
   return SMTP_PRESETS.find((p) => p.host && p.host === host)?.id ?? 'outro';
+}
+
+interface PaySettings {
+  enabled: boolean; keyHint: string | null; testMode: boolean; webhookUrl: string | null; webhookBase: string; webhookSecret: string | null;
+}
+
+function OnlinePayTab() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({ queryKey: ['settings', 'payments'], queryFn: () => api.get<PaySettings>('/api/settings/payments') });
+  const [apiKey, setApiKey] = useState('');
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const save = useMutation({
+    mutationFn: (body: { enabled: boolean; apiKey?: string; regenerateWebhookSecret?: boolean }) =>
+      api.put<{ ok: boolean; storeName: string | null }>('/api/settings/payments', body),
+    onSuccess: (r, v) => {
+      setApiKey('');
+      setErrors({});
+      void qc.invalidateQueries({ queryKey: ['settings'] });
+      toast.success(!v.enabled ? 'PIX automático desligado.' : r.storeName ? `Conectado à loja ${r.storeName} na AbacatePay.` : 'PIX automático ligado.');
+    },
+    onError: (e) => {
+      setErrors(fieldErrors(e));
+      toast.error(e);
+    },
+  });
+  if (q.isLoading) return <Loading />;
+  if (q.error || !q.data) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
+  const p = q.data;
+  return (
+    <div className="stack" style={{ maxWidth: 760 }}>
+      <section className="card card-body stack">
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          <h2 style={{ margin: 0 }}>PIX automático (AbacatePay)</h2>
+          <span className={`badge ${p.enabled ? 'badge-success' : ''}`}>{p.enabled ? (p.testMode ? 'Ligado — modo de teste' : 'Ligado') : 'Desligado'}</span>
+        </div>
+        <p className="muted small" style={{ margin: 0 }}>
+          Cada lembrete leva um <strong>link de pagamento</strong> ({'{{link_pagamento}}'} e {'{{instrucoes_pagamento}}'}) com QR Code e PIX copia e cola.
+          Quando o cliente paga, a cobrança é baixada sozinha e ele recebe a confirmação.
+        </p>
+        <TextField label={p.keyHint ? `Chave da API (atual: ${p.keyHint})` : 'Chave da API da AbacatePay'} type="password" value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)} error={errors.apiKey} autoComplete="off"
+          placeholder={p.keyHint ? 'Em branco mantém a chave atual' : 'abc_prod_…'}
+          hint="No painel da AbacatePay: Integração → Chaves de API → Criar chave. Comece com uma chave de teste (abc_dev_…) para validar." />
+        <div className="form-actions">
+          {p.enabled && <Button variant="ghost" loading={save.isPending} onClick={() => save.mutate({ enabled: false })}>Desligar</Button>}
+          <Button variant="primary" loading={save.isPending} disabled={!apiKey && !p.keyHint}
+            onClick={() => save.mutate({ enabled: true, ...(apiKey ? { apiKey } : {}) })}>{p.enabled ? 'Salvar' : 'Ligar PIX automático'}</Button>
+        </div>
+      </section>
+      {p.keyHint && p.webhookUrl && (
+        <section className="card card-body stack">
+          <h2>Aviso de pagamento (webhook)</h2>
+          <p className="muted small" style={{ margin: 0 }}>
+            No painel da AbacatePay, em <strong>Integração → Webhooks → Criar</strong>, cole o endereço abaixo e o segredo, e marque o evento
+            de pagamento confirmado. Mesmo sem o webhook, o Venceu confere os PIX pendentes a cada poucos minutos.
+          </p>
+          <TextField label="URL do webhook" readOnly value={p.webhookBase} onFocus={(e) => e.currentTarget.select()} />
+          <div><CopyButton text={p.webhookBase} label="Copiar URL" /></div>
+          <TextField label="Segredo do webhook" readOnly value={p.webhookSecret ?? ''} onFocus={(e) => e.currentTarget.select()} />
+          <div className="row-sm">
+            <CopyButton text={p.webhookSecret ?? ''} label="Copiar segredo" />
+            <Button size="sm" variant="ghost" loading={save.isPending} onClick={() => save.mutate({ enabled: p.enabled, regenerateWebhookSecret: true })}>Gerar novo segredo</Button>
+          </div>
+        </section>
+      )}
+    </div>
+  );
 }
 
 function EmailTab({ s }: { s: Settings }) {
