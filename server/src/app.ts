@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
 import { z } from 'zod';
@@ -35,6 +35,22 @@ declare module 'fastify' {
 }
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * Caminho da ROTA encontrada (ex.: "/api/team/:id"), não o texto bruto da URL:
+ * "/%61pi/team" chega à mesma rota e precisa passar pelas mesmas verificações.
+ */
+function routePath(req: FastifyRequest) {
+  return req.routeOptions?.url ?? decodeURIComponentSafe(req.url.split('?')[0] ?? '');
+}
+
+function decodeURIComponentSafe(s: string) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
 
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const { config } = deps;
@@ -94,14 +110,15 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   // CORS: por padrão, somente mesma origem. Origens extras só por configuração explícita.
   app.addHook('onRequest', async (req, reply) => {
     const origin = req.headers.origin;
-    if (!origin || req.url.startsWith('/api/webhooks/')) return;
+    const path = routePath(req);
+    if (!origin || path.startsWith('/api/webhooks/')) return;
     const self = new URL(config.APP_URL).origin;
     // Mesmo site que atende a requisição (ex.: domínio próprio e endereço .netlify.app do mesmo site).
     const host = req.headers.host;
     const sameHost = !!host && origin === `${config.secureCookies ? 'https' : new URL(config.APP_URL).protocol.slice(0, -1)}://${host}`;
     const allowed = origin === self || sameHost || config.corsOrigins.includes(origin);
     if (!allowed) {
-      if (req.url.startsWith('/api/')) throw forbidden('Origem não permitida.');
+      if (path.startsWith('/api/')) throw forbidden('Origem não permitida.');
       return;
     }
     if (origin !== self && !sameHost) {
@@ -118,11 +135,12 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
 
   // Autenticação e CSRF para toda a API (rotas públicas e webhooks declaram config.public).
   app.addHook('preHandler', async (req, reply) => {
-    if (!req.url.startsWith('/api/')) return;
+    const path = routePath(req);
+    if (!path.startsWith('/api/')) return;
     reply.header('Cache-Control', 'no-store');
     reply.header('X-Robots-Tag', 'noindex, nofollow');
     const isPublic = req.routeOptions.config?.public === true;
-    if (isPublic && req.url.startsWith('/api/webhooks/')) return;
+    if (isPublic && path.startsWith('/api/webhooks/')) return;
     const token = req.cookies[sessionCookieName(deps)];
     if (token) {
       const user = await resolveSession(deps, token);

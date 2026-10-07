@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Deps } from '../../lib/context.js';
 import { asUser, audit, requireOrg, requireOwner, requireUser } from '../../lib/context.js';
 import { withTx } from '../../lib/db.js';
-import { badRequest, conflict, notFound } from '../../lib/errors.js';
+import { badRequest, conflict, forbidden, notFound } from '../../lib/errors.js';
 import { parse } from '../../lib/validate.js';
 import { zEmail, zText, zUuid } from '../../lib/normalize.js';
 import {
@@ -128,8 +128,15 @@ export function registerUserRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/team/:id/reset-link', async (req) => {
     const me = requireOwner(req);
     const { id } = parse(z.object({ id: zUuid }), req.params);
-    const ok = await deps.pools.owner.query('select 1 from users where id = $1 and organization_id = $2 and is_active', [id, me.orgId]);
-    if (!ok.rowCount) throw notFound();
+    const ok = await deps.pools.owner.query<{ role: string }>(
+      'select role from users where id = $1 and organization_id = $2 and is_active',
+      [id, me.orgId],
+    );
+    if (!ok.rows[0]) throw notFound();
+    // Link de senha de OUTRO responsável permitiria assumir a conta dele: só a administração da plataforma gera.
+    if (ok.rows[0].role === 'owner' && id !== me.id) {
+      throw forbidden('Para redefinir a senha de outro responsável, peça à administração do Venceu.');
+    }
     return adminResetLink(deps, id);
   });
 

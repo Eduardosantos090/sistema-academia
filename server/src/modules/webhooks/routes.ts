@@ -89,7 +89,7 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: Deps) {
 
   /**
    * Webhook genérico de entrada (Z-API, Evolution API, n8n, Make…):
-   * POST { from, text, id? } com cabeçalhos X-Venceu-Timestamp e
+   * POST { from, text, id } com cabeçalhos X-Venceu-Timestamp e
    * X-Venceu-Signature = sha256=HMAC(segredo, "<timestamp>.<corpo>").
    * As respostas do assistente voltam no corpo da resposta (replies).
    */
@@ -105,12 +105,13 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: Deps) {
     await deps.limiters.webhookOrg.consume(`in:${org.id}`);
 
     const p = z
-      .object({ from: z.string().max(40), text: z.string().max(4096), id: z.string().max(200).optional() })
+      .object({ from: z.string().max(40), text: z.string().max(4096), id: z.string().min(1).max(200) })
       .safeParse(req.body);
-    if (!p.success) return reply.code(422).send({ error: { code: 'invalid', message: 'Envie { from, text, id? }.' } });
+    // "id" é obrigatório: impede que uma requisição assinada capturada seja reenviada (deduplicação).
+    if (!p.success) return reply.code(422).send({ error: { code: 'invalid', message: 'Envie { from, text, id } (id único da mensagem).' } });
     const phone = normalizePhone(p.data.from.startsWith('+') ? p.data.from : `+${p.data.from.replace(/\D/g, '')}`);
     if (!phone) return reply.code(422).send({ error: { code: 'invalid', message: 'Telefone inválido.' } });
-    const r = await handleIncoming(deps, org, phone, p.data.text, p.data.id ?? null);
+    const r = await handleIncoming(deps, org, phone, p.data.text, p.data.id);
     const media = r.media
       ? { url: mediaUrl(deps.config.appUrl, r.media), mime: r.media.mime, name: r.media.name, kind: mediaKind(r.media.mime) }
       : null;

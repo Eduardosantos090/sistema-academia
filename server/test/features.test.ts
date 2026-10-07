@@ -166,6 +166,11 @@ describe('plano e acesso das organizações (plataforma)', () => {
     expect(after.isActive).toBe(true);
     expect(after.suspendedReason).toBeNull();
     expect(after.accessUntil > yesterday).toBe(true);
+    // Cobrança avulsa com vencimento distante NÃO renova o acesso (só as do plano, e no máximo um período).
+    const custId = (await ctx.owner.query('select billing_customer_id as id from organizations where id = $1', [tenant.orgId])).rows[0].id;
+    const avulsa = (await billing.owner.post('/api/charges', { customerId: custId, description: 'Avulsa', amountCents: 100, dueDate: '2099-01-10' })).json().id;
+    await billing.owner.post(`/api/charges/${avulsa}/pay`, { method: 'pix', notify: false });
+    expect(json(await platform.get(`/api/platform/orgs/${tenant.orgId}`)).accessUntil).toBe(after.accessUntil);
   });
 
   it('desativar e reativar acesso manualmente', async () => {
@@ -253,5 +258,42 @@ describe('exportação em planilha', () => {
     expect(cu.body).not.toContain('Outra Empresa');
     expect(cu.body.split('\r\n').filter(Boolean)).toHaveLength(2);
     expect((await platform.get('/api/customers/export')).statusCode).toBe(403);
+  });
+});
+
+describe('correções da auditoria de segurança', () => {
+  it('bloqueia variações IPv6 de endereços internos (SSRF)', async () => {
+    const { owner } = await createOrg(ctx, platform);
+    for (const url of ['https://[::ffff:127.0.0.1]/x', 'https://[::ffff:a9fe:a9fe]/x', 'https://[::127.0.0.1]/x', 'https://[2002:7f00:1::]/x', 'https://[fd00::1]/x']) {
+      expect((await owner.put('/api/settings/whatsapp', { mode: 'webhook', webhookUrl: url })).statusCode, url).toBe(422);
+    }
+  });
+
+  it('caminho codificado (/%61pi/...) não escapa da verificação de sessão e CSRF', async () => {
+    const { owner } = await createOrg(ctx, platform);
+    const anon = await ctx.app.inject({ method: 'GET', url: '/%61pi/team' });
+    expect(anon.statusCode).toBe(401);
+    const noCsrf = await owner.request('POST', '/%61pi/customers', { name: 'Sem CSRF' }, { 'x-csrf-token': 'errado' });
+    expect(noCsrf.statusCode).toBe(403);
+  });
+
+  it('responsável não gera link de senha de outro responsável', async () => {
+    const org = await createOrg(ctx, platform);
+    const other = await inviteStaff(ctx, org.owner, 'owner');
+    const staff = await inviteStaff(ctx, org.owner, 'staff');
+    expect((await org.owner.post(`/api/team/${other.id}/reset-link`)).statusCode).toBe(403);
+    // Para a equipe o pedido é aceito (aqui o e-mail está ativo, então a orientação é usar "Esqueci minha senha": 400).
+    expect((await org.owner.post(`/api/team/${staff.id}/reset-link`)).statusCode).toBe(400);
+  });
+
+  it('webhook genérico exige id da mensagem (impede reenvio)', async () => {
+    const { owner, orgId } = await createOrg(ctx, platform);
+    const secret = (await owner.put('/api/settings/whatsapp', { mode: 'webhook', webhookUrl: 'https://hooks.exemplo.com/y' })).json().webhookSecret;
+    const hook = (await ctx.owner.query('select webhook_id from organizations where id = $1', [orgId])).rows[0].webhook_id;
+    const raw = JSON.stringify({ from: '5511900001111', text: 'oi' });
+    const ts = Math.floor(Date.now() / 1000).toString();
+    const sig = `sha256=${createHmac('sha256', secret).update(`${ts}.${raw}`).digest('hex')}`;
+    const r = await ctx.app.inject({ method: 'POST', url: `/api/webhooks/inbound/${hook}`, payload: raw, headers: { 'content-type': 'application/json', 'x-venceu-timestamp': ts, 'x-venceu-signature': sig } });
+    expect(r.statusCode).toBe(422);
   });
 });

@@ -18,34 +18,30 @@ export type HttpFetch = (url: string, req: HttpRequest) => Promise<HttpResult>;
 
 export class OutboundError extends Error {}
 
-const V4_BLOCKED: [string, number][] = [
-  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16],
-  ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15],
-  ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4],
-];
-
-function v4ToInt(ip: string) {
-  return ip.split('.').reduce((acc, p) => (acc << 8) + Number(p), 0) >>> 0;
+// Redes privadas, locais, reservadas e de metadados de nuvem (IPv4).
+const BLOCKED = new net.BlockList();
+for (const [base, bits] of [
+  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12],
+  ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24],
+  ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4],
+] as const) {
+  BLOCKED.addSubnet(base, bits, 'ipv4');
 }
+// IPv6: só endereços públicos (2000::/3), exceto 6to4, Teredo e documentação.
+const V6_PUBLIC = new net.BlockList();
+V6_PUBLIC.addSubnet('2000::', 3, 'ipv6');
+const V6_BLOCKED = new net.BlockList();
+for (const [base, bits] of [['2002::', 16], ['2001::', 32], ['2001:db8::', 32]] as const) V6_BLOCKED.addSubnet(base, bits, 'ipv6');
 
-/** Endereços privados, locais, reservados ou de metadados de nuvem (proteção contra SSRF). */
+/**
+ * Endereços privados, locais, reservados ou de metadados de nuvem (proteção
+ * contra SSRF). IPv6 só é aceito na faixa pública global — isso também cobre
+ * as formas mapeadas/compatíveis de IPv4 (::ffff:7f00:1, ::127.0.0.1…).
+ */
 export function isBlockedAddress(ip: string): boolean {
-  if (net.isIPv4(ip)) {
-    const n = v4ToInt(ip);
-    return V4_BLOCKED.some(([base, bits]) => (n >>> (32 - bits)) === (v4ToInt(base) >>> (32 - bits)));
-  }
-  if (net.isIPv6(ip)) {
-    const lower = ip.toLowerCase();
-    const mapped = lower.match(/^(?:0*:)*:?ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped) return isBlockedAddress(mapped[1]!);
-    if (lower === '::' || lower === '::1') return true;
-    const first = parseInt(lower.split(':')[0] || '0', 16);
-    if ((first & 0xfe00) === 0xfc00) return true; // fc00::/7 (ULA)
-    if ((first & 0xffc0) === 0xfe80) return true; // fe80::/10 (link-local)
-    if ((first & 0xff00) === 0xff00) return true; // multicast
-    if (lower.startsWith('64:ff9b:') || lower.startsWith('2001:db8:')) return true;
-    return false;
-  }
+  const addr = ip.replace(/^\[|\]$/g, '');
+  if (net.isIPv4(addr)) return BLOCKED.check(addr, 'ipv4');
+  if (net.isIPv6(addr)) return !V6_PUBLIC.check(addr, 'ipv6') || V6_BLOCKED.check(addr, 'ipv6');
   return true;
 }
 

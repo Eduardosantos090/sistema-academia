@@ -31,7 +31,7 @@ Cabeçalhos: `X-Venceu-Timestamp: <unix>` e `X-Venceu-Signature: sha256=<hex>` c
 
 **Recebimento (assistente)** — encaminhe as mensagens recebidas para a URL de entrada exibida no painel:
 ```json
-{ "from": "5511999999999", "text": "1", "id": "id-unico-da-mensagem" }
+{ "from": "5511999999999", "text": "1", "id": "id-unico-da-mensagem (obrigatório)" }
 ```
 assinadas da mesma forma (tolerância de 5 minutos). A resposta traz `{ "replies": ["…"], "intent": "vencimentos" }`
 — envie os textos de `replies` ao cliente. O `id` evita duplicidade em reenvios.

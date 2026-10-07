@@ -22,7 +22,8 @@ function signed(body: object, s = secret, ts = Math.floor(Date.now() / 1000).toS
   };
 }
 
-async function inbound(text: string, from = '5511955554444', id?: string) {
+let msgSeq = 0;
+async function inbound(text: string, from = '5511955554444', id = `msg-${Date.now()}-${msgSeq++}`) {
   const r = await ctx.app.inject({ method: 'POST', url: `/api/webhooks/inbound/${hookId}`, ...signed({ from, text, id }) });
   expect(r.statusCode).toBe(200);
   return r.json() as { replies: string[]; intent: string | null };
