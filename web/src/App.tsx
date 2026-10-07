@@ -15,6 +15,7 @@ import { CustomerPage } from './pages/customers/CustomerPage';
 import { ChargesPage } from './pages/charges/ChargesPage';
 import { PlansPage } from './pages/plans/PlansPage';
 import { MessagesPage } from './pages/messages/MessagesPage';
+import { RemindersPage } from './pages/reminders/RemindersPage';
 import { InboxPage } from './pages/inbox/InboxPage';
 import { AutomationPage } from './pages/automation/AutomationPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
@@ -81,6 +82,7 @@ export function App() {
         <Route path="cobrancas" element={<RequireAuth org><ChargesPage /></RequireAuth>} />
         <Route path="planos" element={<RequireAuth org><PlansPage /></RequireAuth>} />
         <Route path="mensagens" element={<RequireAuth org><MessagesPage /></RequireAuth>} />
+        <Route path="lembretes" element={<RequireAuth org><RemindersPage /></RequireAuth>} />
         <Route path="atendimento" element={<RequireAuth org><InboxPage /></RequireAuth>} />
         <Route path="automacao" element={<RequireAuth org><AutomationPage /></RequireAuth>} />
         <Route path="configuracoes" element={<RequireAuth org><SettingsPage /></RequireAuth>} />

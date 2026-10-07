@@ -3,14 +3,25 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, qs } from '../../api/client';
 import type { InviteResult } from '../../api/types';
-import { Alert, Button, Empty, Loading, Modal, PageHeader, SearchInput, SecretLink, SelectField, TextField, fieldErrors, usePageTitle } from '../../components/ui';
+import { Alert, Button, Empty, Loading, Modal, PageHeader, SearchInput, SecretLink, SelectField, TextField, fieldErrors, useToast, usePageTitle } from '../../components/ui';
 import { Icon } from '../../components/icons';
-import { fmtDateTime, segmentLabel } from '../../lib/format';
+import { fmtCents, fmtDate, fmtDateTime, segmentLabel } from '../../lib/format';
 import { useDebounced } from '../../lib/hooks';
 
 interface Org {
   id: string; name: string; slug: string; segment: string; contactEmail: string | null; isActive: boolean; createdAt: string;
   customers: number; users: number; messages30d: number; lastLoginAt: string | null; whatsappMode: string | null;
+  planName: string | null; planAmountCents: number | null; accessUntil: string | null; accessDaysLeft: number | null;
+  autoSuspend: boolean; autoBilling: boolean; suspendedReason: string | null; isBillingOrg: boolean;
+}
+
+export function AccessBadge({ o }: { o: Pick<Org, 'isActive' | 'accessUntil' | 'accessDaysLeft' | 'suspendedReason' | 'isBillingOrg'> }) {
+  if (o.isBillingOrg) return <span className="badge badge-info">Cobrança da plataforma</span>;
+  if (!o.isActive) return <span className="badge badge-danger">{o.suspendedReason === 'inadimplencia' ? 'Suspensa (atraso)' : 'Desativada'}</span>;
+  if (o.accessDaysLeft === null) return <span className="badge badge-success">Ativa</span>;
+  if (o.accessDaysLeft < 0) return <span className="badge badge-danger">Vencida há {-o.accessDaysLeft}d</span>;
+  if (o.accessDaysLeft <= 5) return <span className="badge badge-warning">Vence em {o.accessDaysLeft}d</span>;
+  return <span className="badge badge-success">Ativa</span>;
 }
 interface Overview { activeOrgs: number; totalOrgs: number; customers: number; messages30d: number; pendingRequests: number }
 
@@ -23,6 +34,26 @@ export function OrgsPage() {
   const [created, setCreated] = useState<InviteResult | null>(null);
   const ov = useQuery({ queryKey: ['platform-overview'], queryFn: () => api.get<Overview>('/api/platform/overview') });
   const list = useQuery({ queryKey: ['orgs', dq], queryFn: () => api.get<{ items: Org[] }>(`/api/platform/orgs${qs({ q: dq })}`) });
+  const qc = useQueryClient();
+  const toast = useToast();
+  const toggle = useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) => api.patch(`/api/platform/orgs/${id}`, { isActive }),
+    onSuccess: (_r, v) => {
+      void qc.invalidateQueries({ queryKey: ['orgs'] });
+      toast.success(v.isActive ? 'Acesso ativado.' : 'Acesso desativado. Os usuários foram desconectados.');
+    },
+    onError: (e) => toast.error(e),
+  });
+  const billing = useQuery({ queryKey: ['billing-org'], queryFn: () => api.get<{ org: { id: string; name: string } | null }>('/api/platform/billing-org') });
+  const setBilling = useMutation({
+    mutationFn: (orgId: string | null) => api.put('/api/platform/billing-org', { orgId }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['billing-org'] });
+      void qc.invalidateQueries({ queryKey: ['orgs'] });
+      toast.success('Organização de cobrança definida.');
+    },
+    onError: (e) => toast.error(e),
+  });
   return (
     <div className="stack" style={{ gap: 20 }}>
       <PageHeader
@@ -40,22 +71,43 @@ export function OrgsPage() {
       )}
       {created?.inviteLink && <div className="card card-body"><SecretLink link={created.inviteLink} hours={created.validHours} /></div>}
       {created?.inviteSent && <Alert kind="success">Organização criada e convite enviado por e-mail ao responsável.</Alert>}
+      <section className="card card-body row" style={{ alignItems: 'flex-end' }}>
+        <div style={{ flex: 1, minWidth: 260 }}>
+          <SelectField
+            label="Organização de cobrança da plataforma"
+            hint="Sua empresa dentro do Venceu: é por ela que os planos dos clientes são cobrados automaticamente (lembretes, PIX, baixa)."
+            value={billing.data?.org?.id ?? ''}
+            onChange={(e) => setBilling.mutate(e.target.value || null)}
+          >
+            <option value="">— não definida —</option>
+            {list.data?.items.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </SelectField>
+        </div>
+      </section>
       <div className="toolbar"><SearchInput value={q} onChange={setQ} placeholder="Buscar organização" label="Buscar organização" /></div>
       <div className="card">
         {list.isLoading ? <Loading /> : !list.data?.items.length ? <Empty title="Nenhuma organização" icon="building" /> : (
           <div className="table-wrap">
             <table className="table responsive">
-              <thead><tr><th>Organização</th><th>Segmento</th><th className="right">Clientes</th><th className="right">Mensagens 30d</th><th>WhatsApp</th><th>Último acesso</th><th>Situação</th></tr></thead>
+              <thead><tr><th>Organização</th><th>Plano</th><th>Acesso até</th><th className="right">Clientes</th><th className="right">Msgs 30d</th><th>Último acesso</th><th>Situação</th><th className="actions">Acesso</th></tr></thead>
               <tbody>
                 {list.data.items.map((o) => (
                   <tr key={o.id} style={{ cursor: 'pointer' }} onClick={() => nav(`/app/plataforma/organizacoes/${o.id}`)}>
                     <td data-label="Organização"><Link to={`/app/plataforma/organizacoes/${o.id}`}>{o.name}</Link><div className="tiny muted">{o.contactEmail}</div></td>
-                    <td data-label="Segmento">{segmentLabel[o.segment] ?? o.segment}</td>
+                    <td data-label="Plano">
+                      {o.planName ?? <span className="faint">—</span>}
+                      {o.planAmountCents ? <div className="tiny muted">{fmtCents(o.planAmountCents)}{o.autoBilling ? ' · cobrança automática' : ''}</div> : null}
+                    </td>
+                    <td data-label="Acesso até" className="num small">{o.accessUntil ? fmtDate(o.accessUntil) : <span className="faint">sem limite</span>}</td>
                     <td data-label="Clientes" className="right num">{o.customers}</td>
-                    <td data-label="Mensagens 30d" className="right num">{o.messages30d}</td>
-                    <td data-label="WhatsApp">{o.whatsappMode === 'cloud_api' ? 'API oficial' : o.whatsappMode === 'webhook' ? 'Webhook' : 'Manual'}</td>
+                    <td data-label="Msgs 30d" className="right num">{o.messages30d}</td>
                     <td data-label="Último acesso" className="small">{fmtDateTime(o.lastLoginAt)}</td>
-                    <td data-label="Situação"><span className={`badge ${o.isActive ? 'badge-success' : 'badge-danger'}`}>{o.isActive ? 'Ativa' : 'Suspensa'}</span></td>
+                    <td data-label="Situação"><AccessBadge o={o} /></td>
+                    <td className="actions" onClick={(e) => e.stopPropagation()}>
+                      {!o.isBillingOrg && (o.isActive
+                        ? <Button size="sm" variant="danger" onClick={() => toggle.mutate({ id: o.id, isActive: false })}>Desativar</Button>
+                        : <Button size="sm" variant="primary" onClick={() => toggle.mutate({ id: o.id, isActive: true })}>Ativar</Button>)}
+                    </td>
                   </tr>
                 ))}
               </tbody>

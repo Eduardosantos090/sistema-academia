@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../auth/AuthContext';
 import { api } from '../api/client';
-import { roleLabel, initials } from '../lib/format';
+import { fmtDate, roleLabel, initials } from '../lib/format';
 import { Button } from '../components/ui';
 import { Icon, type IconName } from '../components/icons';
 import { brand } from '../brand';
@@ -28,6 +28,26 @@ interface Counters {
   waitingConversations: number;
   manualQueue: number;
   toConfirm: number;
+  planName: string | null;
+  accessUntil: string | null;
+  accessDaysLeft: number | null;
+  graceDays: number;
+  autoSuspend: boolean;
+}
+
+/** Aviso do plano do Venceu para a organização (vencendo ou vencido). */
+function PlanBanner({ c }: { c: Counters }) {
+  if (c.accessDaysLeft === null || c.accessDaysLeft > 5) return null;
+  const late = c.accessDaysLeft < 0;
+  const cutIn = c.graceDays + c.accessDaysLeft;
+  return (
+    <div className={`alert ${late ? 'alert-error' : 'alert-warning'}`} role="status" style={{ marginBottom: 16 }}>
+      {late
+        ? `Seu plano${c.planName ? ` ${c.planName}` : ''} venceu em ${fmtDate(c.accessUntil)}.${c.autoSuspend ? ` O acesso será suspenso ${cutIn > 0 ? `em ${cutIn} dia(s)` : 'em breve'} se o pagamento não for registrado.` : ''}`
+        : `Seu plano${c.planName ? ` ${c.planName}` : ''} vence ${c.accessDaysLeft === 0 ? 'hoje' : `em ${c.accessDaysLeft} dia(s)`} (${fmtDate(c.accessUntil)}).`}
+      {' '}Fale com o suporte do Venceu para renovar.
+    </div>
+  );
 }
 
 function Item({ to, icon, label, count, end }: { to: string; icon: IconName; label: string; count?: number; end?: boolean }) {
@@ -87,6 +107,7 @@ export function AppLayout() {
               <Item to="/app/clientes" icon="users" label="Clientes" />
               <Item to="/app/planos" icon="layers" label="Planos e assinaturas" />
               <div className="nav-section">Comunicação</div>
+              <Item to="/app/lembretes" icon="checkCircle" label="Controle de envios" />
               <Item to="/app/atendimento" icon="chat" label="Atendimento" count={c?.waitingConversations} />
               <Item to="/app/mensagens" icon="send" label="Mensagens" count={c?.manualQueue} />
               <Item to="/app/automacao" icon="zap" label="Automação e assistente" />
@@ -129,6 +150,7 @@ export function AppLayout() {
           </Button>
         </header>
         <main id="conteudo" className="content" tabIndex={-1}>
+          {c && <PlanBanner c={c} />}
           <Outlet />
         </main>
         <Footer />

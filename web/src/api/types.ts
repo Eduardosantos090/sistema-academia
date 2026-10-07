@@ -91,6 +91,9 @@ export interface Message {
   customerName?: string | null;
   chargeId?: string | null;
   waLink?: string | null;
+  mediaUrl?: string | null;
+  mediaMime?: string | null;
+  mediaName?: string | null;
 }
 
 export interface CustomerDetail extends Customer {
@@ -119,6 +122,7 @@ export interface Template {
   waTemplateName: string | null;
   waTemplateLang: string;
   rules: number;
+  media?: MediaFile | null;
 }
 
 export interface Rule {
@@ -137,6 +141,7 @@ export interface BotAnswer {
   keywords: string[];
   answer: string;
   isActive: boolean;
+  media?: MediaFile | null;
 }
 
 export interface Conversation {
@@ -157,6 +162,9 @@ export interface ChatMessage {
   body: string;
   createdAt: string;
   userName: string | null;
+  mediaUrl?: string | null;
+  mediaMime?: string | null;
+  mediaName?: string | null;
 }
 
 export interface SendResult {
@@ -184,3 +192,14 @@ export interface InviteResult {
   validHours?: number;
   resetLink?: string;
 }
+
+export interface MediaFile {
+  id: string;
+  name: string;
+  mime: string;
+  token: string;
+  url?: string;
+  sizeBytes?: number;
+}
+
+export const mediaPath = (m: Pick<MediaFile, 'token' | 'name'>) => `/api/media/${m.token}/${encodeURIComponent(m.name)}`;

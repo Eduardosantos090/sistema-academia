@@ -10,7 +10,11 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: Deps) {
       const { rows } = await db.query(
         `select (select count(*)::int from conversations where status = 'humano' and unread > 0) as "waitingConversations",
                 (select count(*)::int from messages where status = 'manual') as "manualQueue",
-                (select count(*)::int from charges where status = 'aberta' and reported_paid_at is not null) as "toConfirm"`,
+                (select count(*)::int from charges where status = 'aberta' and reported_paid_at is not null) as "toConfirm",
+                o.plan_name as "planName", to_char(o.access_until, 'YYYY-MM-DD') as "accessUntil",
+                (o.access_until - app.org_today(o.id)) as "accessDaysLeft", o.grace_days as "graceDays", o.auto_suspend as "autoSuspend"
+           from organizations o where o.id = $1`,
+        [requireOrg(req).orgId],
       );
       return rows[0];
     });
@@ -72,11 +76,21 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: Deps) {
           where ch.status = 'aberta' and ch.due_date < app.org_today(ch.organization_id)
           order by ch.due_date limit 8`,
       );
+      // Quem vence hoje, amanhã, em 2 e em 3 dias (com situação do lembrete).
+      const dueSoon = await db.query(
+        `select ch.id, ch.description, ch.amount_cents as "amountCents", to_char(ch.due_date, 'YYYY-MM-DD') as "dueDate",
+                (ch.due_date - app.org_today(ch.organization_id)) as "inDays",
+                cu.id as "customerId", cu.name as "customerName", cu.phone as "customerPhone",
+                exists (select 1 from messages m where m.charge_id = ch.id and m.status = 'enviada') as "reminded"
+           from charges ch join customers cu on cu.id = ch.customer_id
+          where ch.status = 'aberta' and ch.due_date between app.org_today(ch.organization_id) and app.org_today(ch.organization_id) + 3
+          order by ch.due_date, cu.name limit 400`,
+      );
       const toConfirm = await db.query(
         `select ${cols} from charges ch join customers cu on cu.id = ch.customer_id
           where ch.status = 'aberta' and ch.reported_paid_at is not null order by ch.reported_paid_at desc limit 6`,
       );
-      return { ...rows[0], series: series.rows, upcoming: upcoming.rows, overdue: overdue.rows, toConfirm: toConfirm.rows };
+      return { ...rows[0], series: series.rows, upcoming: upcoming.rows, overdue: overdue.rows, toConfirm: toConfirm.rows, dueSoon: dueSoon.rows };
     });
   });
 }

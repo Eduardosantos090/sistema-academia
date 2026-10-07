@@ -12,7 +12,7 @@ const app = await buildApp(deps);
 
 // Automação periódica: cobranças recorrentes, lembretes, envio da fila e limpeza.
 const tick = () => void runMaintenance(deps).catch((e) => app.log.error({ err: { message: (e as Error).message } }, 'automação falhou'));
-const cleanup = setInterval(tick, 15 * 60 * 1000);
+const cleanup = setInterval(tick, 60 * 1000);
 setTimeout(tick, 10_000).unref();
 cleanup.unref();
 

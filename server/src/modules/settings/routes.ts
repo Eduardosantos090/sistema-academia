@@ -18,6 +18,10 @@ const zTemplateBody = (max: number) =>
     if (bad.length) ctx.addIssue({ code: 'custom', message: `Variável desconhecida: ${bad.map((b) => `{{${b}}}`).join(', ')}` });
   });
 
+/** Anexo como JSON (com link público) para a interface. */
+const MEDIA_JSON = (alias: string) => `case when ${alias}.media_id is null then null else json_build_object(
+  'id', mf.id, 'name', mf.name, 'mime', mf.mime, 'token', mf.token) end`;
+
 const TIMEZONES = [
   'America/Sao_Paulo', 'America/Manaus', 'America/Cuiaba', 'America/Belem', 'America/Fortaleza', 'America/Recife',
   'America/Bahia', 'America/Porto_Velho', 'America/Boa_Vista', 'America/Rio_Branco', 'America/Noronha',
@@ -33,7 +37,8 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
         `select id, name, slug, segment, contact_email as "contactEmail", contact_phone as "contactPhone", document,
                 pix_key as "pixKey", payment_instructions as "paymentInstructions", timezone, send_hour as "sendHour",
                 notify_on_payment as "notifyOnPayment", bot_enabled as "botEnabled", bot_greeting as "botGreeting",
-                webhook_id as "webhookId"
+                webhook_id as "webhookId", send_delay_seconds as "sendDelaySeconds",
+                plan_name as "planName", to_char(access_until, 'YYYY-MM-DD') as "accessUntil"
            from organizations where id = $1`,
         [me.orgId],
       );
@@ -83,6 +88,7 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
           paymentInstructions: zOptionalText(1000).optional(),
           timezone: z.enum(TIMEZONES).optional(),
           sendHour: z.coerce.number().int().min(6).max(20).optional(),
+          sendDelaySeconds: z.coerce.number().int().min(0).max(3600).optional(),
           notifyOnPayment: z.boolean().optional(),
           botEnabled: z.boolean().optional(),
           botGreeting: z
@@ -98,6 +104,7 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
     const map: Record<string, string> = {
       name: 'name', segment: 'segment', contactEmail: 'contact_email', contactPhone: 'contact_phone', document: 'document',
       pixKey: 'pix_key', paymentInstructions: 'payment_instructions', timezone: 'timezone', sendHour: 'send_hour',
+      sendDelaySeconds: 'send_delay_seconds',
       notifyOnPayment: 'notify_on_payment', botEnabled: 'bot_enabled', botGreeting: 'bot_greeting',
     };
     const sets: string[] = [];
@@ -222,8 +229,9 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
     return asUser(deps, req, async (db) => {
       const { rows } = await db.query(
         `select t.id, t.kind, t.name, t.subject, t.body, t.wa_template_name as "waTemplateName", t.wa_template_lang as "waTemplateLang",
-                (select count(*)::int from reminder_rules r where r.template_id = t.id) as "rules", t.updated_at as "updatedAt"
-           from message_templates t order by t.kind, t.name`,
+                (select count(*)::int from reminder_rules r where r.template_id = t.id) as "rules", t.updated_at as "updatedAt",
+                ${MEDIA_JSON('t')} as media
+           from message_templates t left join media_files mf on mf.id = t.media_id order by t.kind, t.name`,
       );
       return { items: rows, vars: TEMPLATE_VARS };
     });
@@ -244,6 +252,7 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
         .transform((v) => v || null)
         .pipe(z.string().regex(/^[a-z0-9_]{1,512}$/, 'Use letras minúsculas, números e _.').nullable()),
       waTemplateLang: z.string().regex(/^[a-z]{2}(_[A-Z]{2})?$/).default('pt_BR'),
+      mediaId: zUuid.nullish().transform((v) => v ?? null),
     })
     .strict();
 
@@ -252,9 +261,9 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
     const b = parse(zTemplate, req.body);
     const id = await asUser(deps, req, async (db) => {
       const { rows } = await db.query<{ id: string }>(
-        `insert into message_templates (organization_id, kind, name, subject, body, wa_template_name, wa_template_lang)
-         values ($1, $2, $3, $4, $5, $6, $7) returning id`,
-        [me.orgId, b.kind, b.name, b.subject, b.body, b.waTemplateName, b.waTemplateLang],
+        `insert into message_templates (organization_id, kind, name, subject, body, wa_template_name, wa_template_lang, media_id)
+         values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
+        [me.orgId, b.kind, b.name, b.subject, b.body, b.waTemplateName, b.waTemplateLang, b.mediaId],
       );
       await audit(db, req, 'template.created', 'template', rows[0]!.id, me.orgId);
       return rows[0]!.id;
@@ -269,9 +278,10 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
     const b = parse(zTemplate, req.body);
     await asUser(deps, req, async (db) => {
       const r = await db.query(
-        `update message_templates set kind = $2, name = $3, subject = $4, body = $5, wa_template_name = $6, wa_template_lang = $7
+        `update message_templates set kind = $2, name = $3, subject = $4, body = $5, wa_template_name = $6, wa_template_lang = $7,
+                media_id = $8
           where id = $1`,
-        [id, b.kind, b.name, b.subject, b.body, b.waTemplateName, b.waTemplateLang],
+        [id, b.kind, b.name, b.subject, b.body, b.waTemplateName, b.waTemplateLang, b.mediaId],
       );
       if (!r.rowCount) throw notFound('Modelo não encontrado.');
       await audit(db, req, 'template.updated', 'template', id, me.orgId);
@@ -389,7 +399,8 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
     requireOrg(req);
     return asUser(deps, req, async (db) => {
       const { rows } = await db.query(
-        `select id, title, keywords, answer, is_active as "isActive" from bot_answers order by is_active desc, title`,
+        `select a.id, a.title, a.keywords, a.answer, a.is_active as "isActive", ${MEDIA_JSON('a')} as media
+           from bot_answers a left join media_files mf on mf.id = a.media_id order by a.is_active desc, a.title`,
       );
       return { items: rows };
     });
@@ -405,6 +416,7 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
         .transform((ks) => [...new Set(ks.map((k) => k.toLowerCase()))]),
       answer: zText(2, 1500),
       isActive: z.boolean().default(true),
+      mediaId: zUuid.nullish().transform((v) => v ?? null),
     })
     .strict();
 
@@ -413,8 +425,8 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
     const b = parse(zAnswer, req.body);
     const id = await asUser(deps, req, async (db) => {
       const { rows } = await db.query<{ id: string }>(
-        `insert into bot_answers (organization_id, title, keywords, answer, is_active) values ($1, $2, $3, $4, $5) returning id`,
-        [me.orgId, b.title, b.keywords, b.answer, b.isActive],
+        `insert into bot_answers (organization_id, title, keywords, answer, is_active, media_id) values ($1, $2, $3, $4, $5, $6) returning id`,
+        [me.orgId, b.title, b.keywords, b.answer, b.isActive, b.mediaId],
       );
       await audit(db, req, 'bot_answer.created', 'bot_answer', rows[0]!.id, me.orgId);
       return rows[0]!.id;
@@ -428,8 +440,8 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
     const { id } = parse(z.object({ id: zUuid }), req.params);
     const b = parse(zAnswer, req.body);
     await asUser(deps, req, async (db) => {
-      const r = await db.query(`update bot_answers set title = $2, keywords = $3, answer = $4, is_active = $5 where id = $1`, [
-        id, b.title, b.keywords, b.answer, b.isActive,
+      const r = await db.query(`update bot_answers set title = $2, keywords = $3, answer = $4, is_active = $5, media_id = $6 where id = $1`, [
+        id, b.title, b.keywords, b.answer, b.isActive, b.mediaId,
       ]);
       if (!r.rowCount) throw notFound('Resposta não encontrada.');
       await audit(db, req, 'bot_answer.updated', 'bot_answer', id, me.orgId);

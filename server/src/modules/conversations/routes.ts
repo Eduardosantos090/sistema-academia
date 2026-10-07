@@ -5,7 +5,8 @@ import { asUser, audit, requireOrg } from '../../lib/context.js';
 import { AppError, notFound } from '../../lib/errors.js';
 import { parse } from '../../lib/validate.js';
 import { waMeLink, zText, zUuid } from '../../lib/normalize.js';
-import { loadChannels, sendWhatsApp, whatsappAutomatic } from '../channels/service.js';
+import { loadChannels, sendWhatsAppWithMedia, whatsappAutomatic } from '../channels/service.js';
+import { mediaUrl } from '../../lib/media.js';
 import { loadBotOrg, simulate } from '../bot/engine.js';
 import { OutboundError } from '../../lib/http.js';
 
@@ -40,13 +41,18 @@ export function registerConversationRoutes(app: FastifyInstance, deps: Deps) {
       );
       if (!rows[0]) throw notFound('Conversa não encontrada.');
       const msgs = await db.query(
-        `select m.id, m.direction, m.author, m.body, m.created_at as "createdAt", u.full_name as "userName"
-           from chat_messages m left join users u on u.id = m.user_id
+        `select m.id, m.direction, m.author, m.body, m.created_at as "createdAt", u.full_name as "userName",
+                mf.token as "mediaToken", mf.name as "mediaName", mf.mime as "mediaMime"
+           from chat_messages m left join users u on u.id = m.user_id left join media_files mf on mf.id = m.media_id
           where m.conversation_id = $1 order by m.created_at desc limit 200`,
         [id],
       );
       await db.query('update conversations set unread = 0 where id = $1 and unread > 0', [id]);
-      return { ...rows[0], messages: msgs.rows.reverse() };
+      const messages = msgs.rows.reverse().map(({ mediaToken, ...m }: { mediaToken: string | null; mediaName: string | null; [k: string]: unknown }) => ({
+        ...m,
+        mediaUrl: mediaToken ? mediaUrl(deps.config.appUrl, { token: mediaToken, name: m.mediaName! }) : null,
+      }));
+      return { ...rows[0], messages };
     });
   });
 
@@ -66,7 +72,14 @@ export function registerConversationRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/conversations/:id/reply', async (req) => {
     const me = requireOrg(req);
     const { id } = parse(z.object({ id: zUuid }), req.params);
-    const body = parse(z.object({ text: zText(1, 4000) }).strict(), req.body);
+    const body = parse(
+      z
+        .object({ text: z.string().max(4000).default(''), mediaId: zUuid.nullish() })
+        .strict()
+        .refine((b) => b.text.trim() || b.mediaId, { message: 'Escreva uma mensagem ou anexe um arquivo.', path: ['text'] }),
+      req.body,
+    );
+    body.text = body.text.trim();
     await deps.limiters.sendNow.consume(`u:${me.id}`);
     const channels = await loadChannels(deps, me.orgId);
     const conv = await asUser(deps, req, async (db) => {
@@ -75,17 +88,26 @@ export function registerConversationRoutes(app: FastifyInstance, deps: Deps) {
         [id],
       );
       if (!rows[0]) throw notFound('Conversa não encontrada.');
+      let media: { token: string; name: string; mime: string } | null = null;
+      if (body.mediaId) {
+        const mf = await db.query<{ token: string; name: string; mime: string }>('select token, name, mime from media_files where id = $1', [body.mediaId]);
+        if (!mf.rows[0]) throw notFound('Arquivo não encontrado.');
+        media = mf.rows[0];
+      }
       await db.query(
-        `insert into chat_messages (organization_id, conversation_id, direction, author, body, user_id)
-         values ($1, $2, 'out', 'atendente', $3, app.uid())`,
-        [me.orgId, id, body.text],
+        `insert into chat_messages (organization_id, conversation_id, direction, author, body, user_id, media_id)
+         values ($1, $2, 'out', 'atendente', $3, app.uid(), $4)`,
+        [me.orgId, id, body.text || `[${media?.name ?? 'anexo'}]`, body.mediaId ?? null],
       );
       await db.query(`update conversations set status = 'humano', unread = 0, last_message_at = now() where id = $1`, [id]);
-      return rows[0];
+      return { ...rows[0], media };
     });
-    if (!whatsappAutomatic(channels)) return { sent: false, waLink: waMeLink(conv.phone, body.text) };
+    const media = conv.media ? { url: mediaUrl(deps.config.appUrl, conv.media), mime: conv.media.mime, name: conv.media.name } : null;
+    if (!whatsappAutomatic(channels)) {
+      return { sent: false, waLink: waMeLink(conv.phone, [body.text, media ? `📎 ${media.url}` : ''].filter(Boolean).join('\n\n')) };
+    }
     try {
-      await sendWhatsApp(deps, { slug: conv.slug }, channels, { to: conv.phone, body: body.text });
+      await sendWhatsAppWithMedia(deps, { slug: conv.slug }, channels, { to: conv.phone, body: body.text, media });
       return { sent: true, waLink: null };
     } catch (e) {
       throw new AppError(502, 'send_failed', e instanceof OutboundError ? e.message : 'Falha ao enviar pelo WhatsApp.');
@@ -103,6 +125,7 @@ export function registerConversationRoutes(app: FastifyInstance, deps: Deps) {
     const org = await loadBotOrg(deps.pools.owner, { id: me.orgId });
     if (!org) throw notFound();
     const d = await simulate(deps, org, body.customerId ?? null, body.text);
-    return { replies: d.replies, intent: d.intent, actions: d.actions };
+    const media = d.media ? { url: mediaUrl(deps.config.appUrl, d.media), mime: d.media.mime, name: d.media.name } : null;
+    return { replies: d.replies, media, intent: d.intent, actions: d.actions };
   });
 }

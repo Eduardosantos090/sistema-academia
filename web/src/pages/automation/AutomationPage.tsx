@@ -9,6 +9,8 @@ import {
 } from '../../components/ui';
 import { Icon, WhatsAppIcon } from '../../components/icons';
 import { offsetLabel, templateKindLabel } from '../../lib/format';
+import { MediaPicker, MediaPreview } from '../../components/Media';
+import type { MediaFile } from '../../api/types';
 import { useDebounced } from '../../lib/hooks';
 
 type Tab = 'regras' | 'modelos' | 'assistente';
@@ -206,6 +208,7 @@ function Templates({ canEdit }: { canEdit: boolean }) {
               )}
             </div>
             <div className="code-box small pre-wrap">{t.body}</div>
+            {t.media && <MediaPreview media={t.media} compact />}
             <div className="row-sm tiny muted">
               {t.rules > 0 && <span>Usado em {t.rules} regra(s)</span>}
               {t.waTemplateName && <span className="badge badge-whatsapp">Modelo Meta: {t.waTemplateName}</span>}
@@ -230,6 +233,7 @@ function TemplateModal({ template, vars, onClose }: { template: Template | null;
   const [body, setBody] = useState(template?.body ?? '');
   const [waName, setWaName] = useState(template?.waTemplateName ?? '');
   const [waLang, setWaLang] = useState(template?.waTemplateLang ?? 'pt_BR');
+  const [media, setMedia] = useState<MediaFile | null>(template?.media ?? null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -254,7 +258,7 @@ function TemplateModal({ template, vars, onClose }: { template: Template | null;
   };
   const m = useMutation({
     mutationFn: () => {
-      const payload = { kind, name, subject: subject || null, body, waTemplateName: waName || null, waTemplateLang: waLang };
+      const payload = { kind, name, subject: subject || null, body, waTemplateName: waName || null, waTemplateLang: waLang, mediaId: media?.id ?? null };
       return template ? api.put(`/api/templates/${template.id}`, payload) : api.post('/api/templates', payload);
     },
     onSuccess: () => {
@@ -293,6 +297,7 @@ function TemplateModal({ template, vars, onClose }: { template: Template | null;
               ))}
             </div>
           </div>
+          <MediaPicker value={media} onChange={setMedia} label="Anexo enviado junto (opcional)" />
           <details>
             <summary className="small" style={{ cursor: 'pointer' }}>WhatsApp API oficial (modelo aprovado pela Meta)</summary>
             <div className="stack-sm" style={{ marginTop: 10 }}>
@@ -312,6 +317,7 @@ function TemplateModal({ template, vars, onClose }: { template: Template | null;
           <div className="phone-mock">
             <div className="chat-body" style={{ minHeight: 260 }}>
               {preview.data?.subject && <div className="tiny muted">Assunto: {preview.data.subject}</div>}
+              {media && <div className="bubble out"><MediaPreview media={media} compact /></div>}
               {preview.data?.body ? <div className="bubble out">{preview.data.body}</div> : <p className="muted small">Escreva a mensagem…</p>}
             </div>
           </div>
@@ -344,7 +350,8 @@ function Answers({ canEdit }: { canEdit: boolean }) {
         <p className="muted small" style={{ margin: 0 }}>
           Ele já entende, sem configuração: <strong>1</strong> vencimentos em aberto · <strong>2</strong> dados de pagamento (PIX e link) ·{' '}
           <strong>3</strong> “já paguei” (marca para sua equipe conferir) · <strong>4</strong> falar com atendente · <strong>SAIR</strong> para
-          parar de receber avisos. Abaixo, ensine respostas para dúvidas frequentes do seu negócio — elas têm prioridade.
+          parar de receber avisos. Abaixo, ensine respostas para dúvidas frequentes do seu negócio — elas têm prioridade e
+          podem levar <strong>imagem, áudio ou PDF</strong> (ex.: tabela de preços, áudio de boas-vindas, regulamento).
         </p>
       </div>
       <div className="row between">
@@ -361,6 +368,7 @@ function Answers({ canEdit }: { canEdit: boolean }) {
                   <span className="title">{a.title} {!a.isActive && <span className="badge">inativa</span>}</span>
                   <div className="row-sm" style={{ margin: '4px 0' }}>{a.keywords.map((k) => <span key={k} className="var-chip">{k}</span>)}</div>
                   <div className="small muted pre-wrap">{a.answer}</div>
+                  {a.media && <div style={{ marginTop: 6 }}><MediaPreview media={a.media} compact /></div>}
                 </div>
                 {canEdit && (
                   <div className="row-sm">
@@ -388,13 +396,14 @@ function AnswerModal({ answer, onClose }: { answer: BotAnswer | null; onClose: (
   const [keywords, setKeywords] = useState(answer?.keywords.join(', ') ?? '');
   const [text, setText] = useState(answer?.answer ?? '');
   const [isActive, setIsActive] = useState(answer?.isActive ?? true);
+  const [media, setMedia] = useState<MediaFile | null>(answer?.media ?? null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   useEffect(() => setError(null), [title, keywords, text]);
   const kws = keywords.split(/[,;\n]/).map((k) => k.trim()).filter(Boolean);
   const m = useMutation({
     mutationFn: () => {
-      const body = { title, keywords: kws, answer: text, isActive };
+      const body = { title, keywords: kws, answer: text, isActive, mediaId: media?.id ?? null };
       return answer ? api.put(`/api/bot-answers/${answer.id}`, body) : api.post('/api/bot-answers', body);
     },
     onSuccess: () => {
@@ -419,6 +428,7 @@ function AnswerModal({ answer, onClose }: { answer: BotAnswer | null; onClose: (
         <TextField label="Palavras-chave (separadas por vírgula)" value={keywords} onChange={(e) => setKeywords(e.target.value)} error={errors.keywords}
           hint="Se a mensagem do cliente contiver alguma delas, o assistente envia esta resposta. Acentos são ignorados." placeholder="horario, funciona, abre, fecha" />
         <TextArea label="Resposta" value={text} onChange={(e) => setText(e.target.value)} rows={5} error={errors.answer} maxLength={1500} />
+        <MediaPicker value={media} onChange={setMedia} label="Enviar junto: imagem, áudio ou PDF (opcional)" />
         <Checkbox checked={isActive} onChange={(e) => setIsActive(e.target.checked)} label="Resposta ativa" />
       </div>
     </Modal>

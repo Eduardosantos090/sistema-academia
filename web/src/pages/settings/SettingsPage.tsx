@@ -14,7 +14,7 @@ interface Settings {
   organization: {
     id: string; name: string; slug: string; segment: string; contactEmail: string | null; contactPhone: string | null; document: string | null;
     pixKey: string | null; paymentInstructions: string | null; timezone: string; sendHour: number; notifyOnPayment: boolean;
-    botEnabled: boolean; botGreeting: string | null;
+    botEnabled: boolean; botGreeting: string | null; sendDelaySeconds: number;
   };
   channels: {
     whatsappMode: WhatsAppMode; whatsappAutomatic: boolean; phoneNumberId: string | null; hasAccessToken: boolean; hasAppSecret: boolean;
@@ -113,13 +113,16 @@ function BillingTab({ s, canEdit }: { s: Settings; canEdit: boolean }) {
   const [f, setF] = useState({
     pixKey: o.pixKey ?? '', paymentInstructions: o.paymentInstructions ?? '', sendHour: String(o.sendHour), notifyOnPayment: o.notifyOnPayment,
     botEnabled: o.botEnabled, botGreeting: o.botGreeting ?? '', timezone: o.timezone,
+    delayValue: String(o.sendDelaySeconds % 60 === 0 && o.sendDelaySeconds >= 60 ? o.sendDelaySeconds / 60 : o.sendDelaySeconds),
+    delayUnit: o.sendDelaySeconds % 60 === 0 && o.sendDelaySeconds >= 60 ? 'min' : 's',
   });
+  const delaySeconds = Math.min(3600, Math.max(0, Math.round((Number(f.delayValue.replace(',', '.')) || 0) * (f.delayUnit === 'min' ? 60 : 1))));
   return (
     <form className="stack" style={{ maxWidth: 820 }} onSubmit={(e) => {
       e.preventDefault();
       m.mutate({
         pixKey: f.pixKey || null, paymentInstructions: f.paymentInstructions || null, sendHour: Number(f.sendHour), notifyOnPayment: f.notifyOnPayment,
-        botEnabled: f.botEnabled, botGreeting: f.botGreeting || null, timezone: f.timezone,
+        botEnabled: f.botEnabled, botGreeting: f.botGreeting || null, timezone: f.timezone, sendDelaySeconds: delaySeconds,
       });
     }}>
       <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: 0 }} className="stack">
@@ -140,6 +143,15 @@ function BillingTab({ s, canEdit }: { s: Settings; canEdit: boolean }) {
             <SelectField label="Fuso horário" value={f.timezone} onChange={(e) => setF({ ...f, timezone: e.target.value })}>
               {['America/Sao_Paulo', 'America/Manaus', 'America/Cuiaba', 'America/Belem', 'America/Fortaleza', 'America/Recife', 'America/Bahia',
                 'America/Porto_Velho', 'America/Boa_Vista', 'America/Rio_Branco', 'America/Noronha'].map((t) => <option key={t} value={t}>{t.replace('America/', '').replace('_', ' ')}</option>)}
+            </SelectField>
+          </div>
+          <div className="form-grid">
+            <TextField label="Intervalo entre mensagens" type="number" min={0} step="any" value={f.delayValue}
+              onChange={(e) => setF({ ...f, delayValue: e.target.value })}
+              hint={delaySeconds ? `Uma mensagem a cada ${delaySeconds >= 60 && delaySeconds % 60 === 0 ? `${delaySeconds / 60} min` : `${delaySeconds} s`} — reduz o risco de bloqueio do WhatsApp. Máximo 60 min.` : 'Sem intervalo: envia tudo de uma vez.'} />
+            <SelectField label="Unidade" value={f.delayUnit} onChange={(e) => setF({ ...f, delayUnit: e.target.value })}>
+              <option value="s">segundos</option>
+              <option value="min">minutos</option>
             </SelectField>
           </div>
           <Switch checked={f.notifyOnPayment} onChange={(e) => setF({ ...f, notifyOnPayment: e.target.checked })} label="Enviar confirmação ao registrar um pagamento" />

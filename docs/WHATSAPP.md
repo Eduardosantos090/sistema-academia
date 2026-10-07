@@ -38,6 +38,13 @@ assinadas da mesma forma (tolerância de 5 minutos). A resposta traz `{ "replies
 
 Observação: provedores não oficiais podem ter o número bloqueado pelo WhatsApp (Cláusula 7ª, §1º).
 
+## Anexos e intervalo entre envios
+- Imagem (JPG/PNG), áudio (OGG/Opus, MP3, M4A, AAC, AMR) e PDF, até 4 MB. O WhatsApp baixa o arquivo por um link com identificador aleatório (`/api/media/<token>/<nome>`).
+- API oficial: imagem e PDF levam o texto como legenda; áudio vai em mensagem separada. Fora da janela de 24 h a Meta só aceita modelos aprovados — anexos de lembretes funcionam melhor via webhook (Z-API/Evolution) ou dentro da conversa.
+- Webhook: o corpo do envio inclui `media: { url, mime, name, kind }`; a resposta do webhook de entrada inclui `media` quando a resposta do assistente tem anexo.
+- Modo manual: o link do anexo é incluído no texto da mensagem.
+- O **intervalo entre mensagens** (Configurações) vale para o envio automático: uma mensagem por vez, no ritmo escolhido. A rotina roda a cada minuto.
+
 ## Comandos que o assistente entende
 | Cliente envia | Resposta |
 | --- | --- |

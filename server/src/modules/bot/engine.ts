@@ -1,6 +1,7 @@
 import type { Deps } from '../../lib/context.js';
 import { withTx, type Db } from '../../lib/db.js';
 import { phoneVariants } from '../../lib/normalize.js';
+import type { MediaRef } from '../../lib/media.js';
 import { firstName, formatCents, formatDate, paymentInstructions, renderTemplate } from '../../lib/template.js';
 
 /**
@@ -42,6 +43,7 @@ interface OpenCharge {
 interface BotAnswer {
   keywords: string[];
   answer: string;
+  media?: MediaRef | null;
 }
 
 export type Intent = 'menu' | 'vencimentos' | 'pagamento' | 'ja_paguei' | 'atendente' | 'sair' | 'reativar' | 'faq' | 'nao_entendi';
@@ -49,6 +51,8 @@ export type Intent = 'menu' | 'vencimentos' | 'pagamento' | 'ja_paguei' | 'atend
 export interface BotDecision {
   intent: Intent;
   replies: string[];
+  /** Anexo enviado junto com a resposta (respostas personalizadas com imagem, áudio ou PDF). */
+  media?: MediaRef | null;
   actions: {
     handoff?: boolean;
     backToBot?: boolean;
@@ -147,7 +151,7 @@ export function decide(
         return nk && ` ${text} `.includes(` ${nk} `);
       }),
     );
-    if (faq) return { intent: 'faq', replies: [faq.answer], actions: {} };
+    if (faq) return { intent: 'faq', replies: [faq.answer], media: faq.media ?? null, actions: {} };
   }
   if (!intent && has(text, RE.atendente)) intent = 'atendente';
   if (!intent && has(text, RE.vencimentos)) intent = 'vencimentos';
@@ -228,10 +232,17 @@ async function loadContext(db: Db, orgId: string, customerIds: string[]) {
       ).rows
     : [];
   const answers = (
-    await db.query<BotAnswer>('select keywords, answer from bot_answers where organization_id = $1 and is_active order by created_at', [
-      orgId,
-    ])
-  ).rows;
+    await db.query<{ keywords: string[]; answer: string; media_id: string | null; token: string | null; name: string | null; mime: string | null }>(
+      `select a.keywords, a.answer, a.media_id, mf.token, mf.name, mf.mime
+         from bot_answers a left join media_files mf on mf.id = a.media_id
+        where a.organization_id = $1 and a.is_active order by a.created_at`,
+      [orgId],
+    )
+  ).rows.map((r) => ({
+    keywords: r.keywords,
+    answer: r.answer,
+    media: r.media_id && r.token ? { id: r.media_id, token: r.token, name: r.name!, mime: r.mime! } : null,
+  }));
   return { charges, answers };
 }
 
@@ -269,7 +280,7 @@ export async function handleIncoming(
   phone: string,
   text: string,
   providerId: string | null,
-): Promise<{ replies: string[]; conversationId: string; intent: Intent | null }> {
+): Promise<{ replies: string[]; media: MediaRef | null; conversationId: string; intent: Intent | null }> {
   return withTx(deps.pools.owner, async (db) => {
     const variants = phoneVariants(phone);
     const customers = (
@@ -298,7 +309,7 @@ export async function handleIncoming(
        on conflict (organization_id, provider_id) where provider_id is not null do nothing`,
       [org.id, conv.id, text.slice(0, 4096) || '[mensagem vazia]', providerId],
     );
-    if (!inserted.rowCount) return { replies: [], conversationId: conv.id, intent: null }; // reentrega do provedor
+    if (!inserted.rowCount) return { replies: [], media: null, conversationId: conv.id, intent: null }; // reentrega do provedor
 
     const recent = await db.query<{ n: number }>(
       `select count(*)::int as n from chat_messages
@@ -311,7 +322,7 @@ export async function handleIncoming(
 
     if (!org.bot_enabled || flooding || (conv.status === 'humano' && !wantsMenu)) {
       await db.query('update conversations set unread = unread + 1 where id = $1', [conv.id]);
-      return { replies: [], conversationId: conv.id, intent: null };
+      return { replies: [], media: null, conversationId: conv.id, intent: null };
     }
 
     const ctx = await loadContext(db, org.id, customers.map((c) => c.id));
@@ -342,13 +353,13 @@ export async function handleIncoming(
       `update conversations set status = $2, unread = case when $3 then unread + 1 else unread end where id = $1`,
       [conv.id, status, attention],
     );
-    for (const r of d.replies) {
+    for (const [i, r] of d.replies.entries()) {
       await db.query(
-        `insert into chat_messages (organization_id, conversation_id, direction, author, body)
-         values ($1, $2, 'out', 'bot', $3)`,
-        [org.id, conv.id, r.slice(0, 4096)],
+        `insert into chat_messages (organization_id, conversation_id, direction, author, body, media_id)
+         values ($1, $2, 'out', 'bot', $3, $4)`,
+        [org.id, conv.id, r.slice(0, 4096), i === 0 ? (d.media?.id ?? null) : null],
       );
     }
-    return { replies: d.replies, conversationId: conv.id, intent: d.intent };
+    return { replies: d.replies, media: d.media ?? null, conversationId: conv.id, intent: d.intent };
   });
 }

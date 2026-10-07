@@ -23,6 +23,8 @@ import { registerDashboardRoutes } from './modules/dashboard/routes.js';
 import { registerPublicRoutes } from './modules/public/routes.js';
 import { registerWebhookRoutes } from './modules/webhooks/routes.js';
 import { registerAuditRoutes } from './modules/audit/routes.js';
+import { registerMediaRoutes } from './modules/media/routes.js';
+import { registerReminderRoutes } from './modules/reminders/routes.js';
 
 z.config(z.locales.pt());
 
@@ -167,6 +169,8 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   registerPublicRoutes(app, deps);
   registerWebhookRoutes(app, deps);
   registerAuditRoutes(app, deps);
+  registerMediaRoutes(app, deps);
+  registerReminderRoutes(app, deps);
 
   /** Saúde da API e do banco. Em falha, informa só a CATEGORIA (sem hosts ou credenciais). */
   app.get('/api/health', { config: { public: true } }, async (_req, reply) => {

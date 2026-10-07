@@ -6,6 +6,7 @@ import { AppError } from '../../lib/errors.js';
 import { parse } from '../../lib/validate.js';
 import { Where } from '../../lib/sql.js';
 import { waMeLink, zPage, zUuid } from '../../lib/normalize.js';
+import { mediaUrl } from '../../lib/media.js';
 import { dispatchMessage } from '../automation/dispatch.js';
 import { loadChannels, whatsappAutomatic } from '../channels/service.js';
 
@@ -26,18 +27,22 @@ export function registerMessageRoutes(app: FastifyInstance, deps: Deps) {
       const total = await db.query<{ n: number }>(`select count(*)::int as n from messages m ${w.clause}`, w.params);
       const lim = w.param(q.pageSize);
       const off = w.param((q.page - 1) * q.pageSize);
-      const { rows } = await db.query<{ status: string; channel: string; toAddress: string; body: string }>(
+      const { rows } = await db.query<{ status: string; channel: string; toAddress: string; body: string; mediaToken: string | null; mediaName: string | null }>(
         `select m.id, m.channel, m.kind, m.status, m.to_address as "toAddress", m.subject, m.body, m.error, m.attempts,
                 m.created_at as "createdAt", m.sent_at as "sentAt", m.charge_id as "chargeId",
-                cu.id as "customerId", cu.name as "customerName"
-           from messages m left join customers cu on cu.id = m.customer_id
+                cu.id as "customerId", cu.name as "customerName", mf.token as "mediaToken", mf.name as "mediaName", mf.mime as "mediaMime"
+           from messages m left join customers cu on cu.id = m.customer_id left join media_files mf on mf.id = m.media_id
            ${w.clause} order by m.created_at desc limit ${lim} offset ${off}`,
         w.params,
       );
-      const items = rows.map((m) => ({
-        ...m,
-        waLink: m.channel === 'whatsapp' && m.status === 'manual' ? waMeLink(m.toAddress, m.body) : null,
-      }));
+      const items = rows.map(({ mediaToken, ...m }) => {
+        const url = mediaToken ? mediaUrl(deps.config.appUrl, { token: mediaToken, name: m.mediaName! }) : null;
+        return {
+          ...m,
+          mediaUrl: url,
+          waLink: m.channel === 'whatsapp' && m.status === 'manual' ? waMeLink(m.toAddress, m.body + (url ? `\n\n📎 ${url}` : '')) : null,
+        };
+      });
       const counts = await db.query(
         `select count(*) filter (where status = 'manual')::int as manual,
                 count(*) filter (where status = 'pendente')::int as pendente,

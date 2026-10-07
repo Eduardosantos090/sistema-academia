@@ -41,6 +41,7 @@ interface Dashboard {
   upcoming: DashRow[];
   overdue: DashRow[];
   toConfirm: DashRow[];
+  dueSoon: (Omit<DashRow, 'daysLate' | 'reportedPaidAt'> & { inDays: number; reminded: boolean })[];
 }
 
 function Stat({ icon, label, value, meta, tone, to }: { icon: IconName; label: string; value: string; meta?: string; tone?: 'danger' | 'warning' | 'info'; to?: string }) {
@@ -125,6 +126,8 @@ export function DashboardPage() {
         <Stat icon="users" label="Clientes ativos" value={String(d.activeCustomers)} meta={`${d.activeSubscriptions} assinatura(s) ativa(s)`} tone="warning" to="/app/clientes" />
       </div>
 
+      <DueSoon rows={d.dueSoon} />
+
       <div className="grid grid-main">
         <section className="card" aria-labelledby="chart-title">
           <div className="card-header">
@@ -207,6 +210,52 @@ function ChargeList({ title, rows, today, empty, link, onPay, onSend, late }: {
           })}
         </ul>
       )}
+    </section>
+  );
+}
+
+const DUE_LABELS = ['Vence hoje', 'Vence amanhã', 'Vence em 2 dias', 'Vence em 3 dias'];
+
+/** Clientes que vencem hoje, em 1, 2 e 3 dias — com indicação de lembrete enviado. */
+function DueSoon({ rows }: { rows: Dashboard['dueSoon'] }) {
+  return (
+    <section className="card" aria-labelledby="due-title">
+      <div className="card-header">
+        <h2 id="due-title">Próximos vencimentos — hoje, 1, 2 e 3 dias</h2>
+        <Link to="/app/lembretes?periodo=3" className="small">Controle de envios</Link>
+      </div>
+      <div className="grid grid-4" style={{ padding: 16, gap: 12 }}>
+        {[0, 1, 2, 3].map((n) => {
+          const list = rows.filter((r) => r.inDays === n);
+          const total = list.reduce((s, r) => s + r.amountCents, 0);
+          const sent = list.filter((r) => r.reminded).length;
+          return (
+            <div key={n} className="card" style={{ background: 'var(--bg-2)' }}>
+              <div className="card-body stack-sm" style={{ padding: 14 }}>
+                <div className="row between">
+                  <span className={`eyebrow ${n === 0 ? '' : ''}`} style={{ color: n === 0 ? 'var(--warning)' : undefined }}>{DUE_LABELS[n]}</span>
+                  <span className="badge plain">{list.length}</span>
+                </div>
+                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '1.2rem' }} className="num">{fmtCents(total)}</div>
+                <span className="tiny muted">{list.length ? `${sent} de ${list.length} já receberam lembrete` : 'Nenhum vencimento'}</span>
+                <ul className="list" style={{ maxHeight: 180, overflowY: 'auto' }}>
+                  {list.slice(0, 30).map((r) => (
+                    <li key={r.id} className="row-sm" style={{ padding: '4px 0', flexWrap: 'nowrap' }}>
+                      <span title={r.reminded ? 'Lembrete enviado' : 'Falta enviar'} style={{ color: r.reminded ? 'var(--brand)' : 'var(--text-faint)' }}>
+                        <Icon name={r.reminded ? 'checkCircle' : 'clock'} size={14} />
+                      </span>
+                      <Link to={`/app/clientes/${r.customerId}`} className="small" style={{ color: 'var(--text)', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                        {r.customerName}
+                      </Link>
+                      <span className="tiny muted num nowrap">{fmtCents(r.amountCents)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }

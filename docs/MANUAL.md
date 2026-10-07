@@ -32,3 +32,15 @@
 ## Plataforma (administração do Venceu)
 - **Organizações**: cadastre empresas (já nascem com modelos, regras e assistente), suspenda/reative, gerencie usuários.
 - **Pedidos de acesso**: aprove com um clique os pedidos feitos pelo site.
+
+## Novidades
+- **Anexos (imagem, áudio, PDF)**: em Automação → Respostas do assistente e → Modelos, anexe um arquivo (até 4 MB) que vai junto da mensagem. No Atendimento, use o clipe para enviar imagem, áudio ou PDF ao cliente.
+- **Intervalo entre mensagens**: Configurações → Cobrança e assistente → "Intervalo entre mensagens" (segundos ou minutos). Os disparos saem um a um nesse ritmo, reduzindo o risco de bloqueio do WhatsApp.
+- **Controle de envios**: mostra, para cada cobrança em atraso ou que vence no período, se o cliente já recebeu o lembrete, se falta, se está na fila ou se falhou. Selecione e envie, ou use "Enviar para quem falta".
+- **Painel**: bloco "Próximos vencimentos — hoje, 1, 2 e 3 dias", com quem já recebeu lembrete.
+
+## Plataforma: planos e acesso dos clientes (Eduardo)
+- **Ativar/Desativar acesso**: na lista de Organizações (botão na linha) ou na página da organização.
+- **Ativar plano manualmente**: na organização → "Plano e acesso" → +1 mês, +3, +6 ou 1 ano (libera e reativa).
+- **Suspensão automática**: marque "Suspender automaticamente se vencer" e a tolerância em dias.
+- **Cobrança automática**: escolha em Organizações a sua "Organização de cobrança" (a sua empresa dentro do Venceu). Na organização do cliente, defina o valor do plano e clique em "Ativar cobrança automática": o cliente vira um assinante na sua organização, recebe os lembretes e, quando você registrar o pagamento, o acesso dele é renovado sozinho (e reativado, se estava suspenso por atraso).

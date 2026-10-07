@@ -81,6 +81,7 @@ export interface Limiters {
   webhookOrg: RateLimiter;
   sendNow: RateLimiter;
   publicIp: RateLimiter;
+  mediaIp: RateLimiter;
 }
 
 export function createLimiters(store: 'memory' | 'postgres' = 'memory', pool?: pg.Pool): Limiters {
@@ -100,5 +101,7 @@ export function createLimiters(store: 'memory' | 'postgres' = 'memory', pool?: p
     // Envios manuais por usuário (evita disparo em massa acidental ou abusivo).
     sendNow: make('sendNow', 120, 60 * min),
     publicIp: make('publicIp', 30, 15 * min),
+    // Downloads de anexos (servidores do WhatsApp e navegadores).
+    mediaIp: make('mediaIp', 600, 10 * min),
   };
 }

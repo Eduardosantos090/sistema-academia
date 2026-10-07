@@ -94,6 +94,11 @@ export function MessagesPage() {
                     </div>
                     {m.subject && <div className="small" style={{ marginTop: 6, fontWeight: 600 }}>{m.subject}</div>}
                     <div className="small pre-wrap muted" style={{ marginTop: 4 }}>{m.body}</div>
+                    {m.mediaUrl && (
+                      <a className="tiny row-sm" href={new URL(m.mediaUrl).pathname} target="_blank" rel="noopener noreferrer" style={{ marginTop: 4 }}>
+                        <Icon name="file" size={13} /> Anexo: {m.mediaName}
+                      </a>
+                    )}
                     {m.error && <div className="tiny red" style={{ marginTop: 4 }}>{m.error}</div>}
                   </div>
                   <div className="row-sm" style={{ justifyContent: 'flex-end' }}>

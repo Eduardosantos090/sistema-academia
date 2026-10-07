@@ -7,6 +7,8 @@ import { Alert, Button, Empty, ErrorState, Loading, PageHeader, Segmented, Selec
 import { Icon, WhatsAppIcon } from '../../components/icons';
 import { fmtDateTime, fmtPhone } from '../../lib/format';
 import { useDebounced } from '../../lib/hooks';
+import { MediaPreview, uploadMedia } from '../../components/Media';
+import type { MediaFile } from '../../api/types';
 
 type Tab = 'conversas' | 'simulador';
 const statusLabel = { bot: 'Assistente', humano: 'Atendente', encerrada: 'Encerrada' } as const;
@@ -83,6 +85,9 @@ function Chat({ id }: { id: string }) {
   const toast = useToast();
   const [text, setText] = useState('');
   const [waLink, setWaLink] = useState<string | null>(null);
+  const [attachment, setAttachment] = useState<MediaFile | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const q = useQuery({ queryKey: ['conversation', id], queryFn: () => api.get<ConvDetail>(`/api/conversations/${id}`), refetchInterval: 10_000 });
   useEffect(() => {
@@ -95,9 +100,10 @@ function Chat({ id }: { id: string }) {
     void qc.invalidateQueries({ queryKey: ['counters'] });
   };
   const reply = useMutation({
-    mutationFn: () => api.post<{ sent: boolean; waLink: string | null }>(`/api/conversations/${id}/reply`, { text }),
+    mutationFn: () => api.post<{ sent: boolean; waLink: string | null }>(`/api/conversations/${id}/reply`, { text, mediaId: attachment?.id ?? null }),
     onSuccess: (r) => {
       setText('');
+      setAttachment(null);
       setWaLink(r.waLink);
       refresh();
     },
@@ -113,7 +119,19 @@ function Chat({ id }: { id: string }) {
   const c = q.data;
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (text.trim()) reply.mutate();
+    if (text.trim() || attachment) reply.mutate();
+  };
+  const attach = async (file?: File) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      setAttachment(await uploadMedia(file));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : e);
+    } finally {
+      setUploading(false);
+      if (fileInput.current) fileInput.current.value = '';
+    }
   };
   return (
     <div className="chat">
@@ -130,6 +148,11 @@ function Chat({ id }: { id: string }) {
       <div className="chat-body" ref={body} aria-live="polite">
         {c.messages.map((m) => (
           <div key={m.id} className={`bubble ${m.direction} ${m.author === 'bot' ? 'bot' : ''}`}>
+            {m.mediaUrl && m.mediaMime && (
+              <div style={{ marginBottom: 6 }}>
+                <MediaPreview media={{ token: new URL(m.mediaUrl).pathname.split('/')[3]!, name: m.mediaName ?? 'anexo', mime: m.mediaMime }} compact />
+              </div>
+            )}
             {m.body}
             <span className="meta">
               {fmtDateTime(m.createdAt)} · {m.author === 'bot' ? 'Assistente' : m.author === 'atendente' ? m.userName ?? 'Atendente' : 'Cliente'}
@@ -147,7 +170,17 @@ function Chat({ id }: { id: string }) {
           </Alert>
         </div>
       )}
+      {attachment && (
+        <div className="row-sm" style={{ padding: '10px 12px 0' }}>
+          <MediaPreview media={attachment} compact />
+          <Button size="sm" variant="ghost" onClick={() => setAttachment(null)}>Remover anexo</Button>
+        </div>
+      )}
       <form className="chat-compose" onSubmit={submit}>
+        <input ref={fileInput} type="file" hidden accept="image/jpeg,image/png,audio/*,.ogg,.opus,.mp3,.m4a,.aac,.amr,application/pdf" onChange={(e) => void attach(e.target.files?.[0])} />
+        <Button variant="ghost" className="btn-icon" loading={uploading} onClick={() => fileInput.current?.click()} aria-label="Anexar imagem, áudio ou PDF" title="Anexar imagem, áudio ou PDF">
+          <Icon name="link" />
+        </Button>
         <textarea
           className="textarea"
           value={text}
@@ -158,11 +191,11 @@ function Chat({ id }: { id: string }) {
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
-              if (text.trim()) reply.mutate();
+              if (text.trim() || attachment) reply.mutate();
             }
           }}
         />
-        <Button type="submit" variant="primary" loading={reply.isPending} disabled={!text.trim()} aria-label="Enviar resposta">
+        <Button type="submit" variant="primary" loading={reply.isPending} disabled={!text.trim() && !attachment} aria-label="Enviar resposta">
           <Icon name="send" />
         </Button>
       </form>
@@ -170,7 +203,7 @@ function Chat({ id }: { id: string }) {
   );
 }
 
-interface SimMsg { from: 'cliente' | 'bot'; text: string }
+interface SimMsg { from: 'cliente' | 'bot'; text: string; media?: { url: string; mime: string; name: string } | null }
 
 function Simulator() {
   const [customerId, setCustomerId] = useState('');
@@ -185,8 +218,9 @@ function Simulator() {
   });
   useEffect(() => body.current?.scrollTo({ top: body.current.scrollHeight }), [msgs.length]);
   const sim = useMutation({
-    mutationFn: (t: string) => api.post<{ replies: string[]; intent: string }>('/api/bot/simulate', { customerId: customerId || null, text: t }),
-    onSuccess: (r) => setMsgs((m) => [...m, ...r.replies.map((x) => ({ from: 'bot' as const, text: x }))]),
+    mutationFn: (t: string) =>
+      api.post<{ replies: string[]; intent: string; media: { url: string; mime: string; name: string } | null }>('/api/bot/simulate', { customerId: customerId || null, text: t }),
+    onSuccess: (r) => setMsgs((m) => [...m, ...r.replies.map((x, i) => ({ from: 'bot' as const, text: x, media: i === 0 ? r.media : null }))]),
   });
   const say = (t: string) => {
     if (!t.trim()) return;
@@ -220,7 +254,14 @@ function Simulator() {
         <div className="chat-body" ref={body}>
           {msgs.length === 0 && <p className="muted small" style={{ textAlign: 'center', margin: 'auto' }}>Envie “Oi” para começar.</p>}
           {msgs.map((m, i) => (
-            <div key={i} className={`bubble ${m.from === 'cliente' ? 'out' : 'in bot'}`}>{m.text}</div>
+            <div key={i} className={`bubble ${m.from === 'cliente' ? 'out' : 'in bot'}`}>
+              {m.media && (
+                <div style={{ marginBottom: 6 }}>
+                  <MediaPreview media={{ token: new URL(m.media.url).pathname.split('/')[3]!, name: m.media.name, mime: m.media.mime }} compact />
+                </div>
+              )}
+              {m.text}
+            </div>
           ))}
           {sim.isPending && <div className="bubble in bot">digitando…</div>}
         </div>

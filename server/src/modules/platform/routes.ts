@@ -3,9 +3,11 @@ import { z } from 'zod';
 import type { Deps } from '../../lib/context.js';
 import { asUser, audit, requirePlatform } from '../../lib/context.js';
 import type { Db } from '../../lib/db.js';
-import { conflict, notFound } from '../../lib/errors.js';
+import { AppError, conflict, notFound } from '../../lib/errors.js';
 import { parse } from '../../lib/validate.js';
-import { zEmail, zOptionalEmail, zOptionalPhone, zText, zUuid } from '../../lib/normalize.js';
+import { zDate, zEmail, zOptionalEmail, zOptionalPhone, zOptionalText, zText, zUuid } from '../../lib/normalize.js';
+import { withTx } from '../../lib/db.js';
+import { zInterval } from '../plans/routes.js';
 import { ACCESS_STATUS_SQL, adminResetLink, inviteUser } from '../users/routes.js';
 
 export const SEGMENTS = [
@@ -69,6 +71,15 @@ async function createOrganization(deps: Deps, req: FastifyRequest, body: z.outpu
   return { orgId, ownerId: u.rows[0]!.id, slug };
 }
 
+/** Auditoria das ações da plataforma sobre uma organização (servidor privilegiado). */
+async function auditOrg(db: Db, actorId: string, action: string, orgId: string | null, ip: string, details: Record<string, unknown> = {}) {
+  await db.query(
+    `insert into audit_events (actor_id, organization_id, action, entity_type, entity_id, details, ip)
+     values ($1, $2, $3, 'organization', $4, $5, $6)`,
+    [actorId, orgId, action, orgId, JSON.stringify(details), ip],
+  );
+}
+
 export function registerPlatformRoutes(app: FastifyInstance, deps: Deps) {
   /** Visão geral: somente totais agregados (sem dados pessoais dos clientes das organizações). */
   app.get('/api/platform/overview', async (req) => {
@@ -94,7 +105,11 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: Deps) {
               (select count(*)::int from messages m where m.organization_id = o.id and m.status = 'enviada'
                  and m.sent_at > now() - interval '30 days') as "messages30d",
               (select max(u.last_login_at) from users u where u.organization_id = o.id) as "lastLoginAt",
-              ch.whatsapp_mode as "whatsappMode"
+              ch.whatsapp_mode as "whatsappMode",
+              o.plan_name as "planName", o.plan_amount_cents as "planAmountCents", o.plan_interval_months as "planIntervalMonths",
+              to_char(o.access_until, 'YYYY-MM-DD') as "accessUntil", o.auto_suspend as "autoSuspend", o.grace_days as "graceDays",
+              o.suspended_reason as "suspendedReason", (o.billing_customer_id is not null) as "autoBilling", o.is_billing_org as "isBillingOrg",
+              (o.access_until - app.org_today(o.id)) as "accessDaysLeft"
          from organizations o left join org_channels ch on ch.organization_id = o.id
         where ($1::text is null or o.name ilike '%' || $1 || '%' or o.slug ilike '%' || $1 || '%')
         order by o.is_active desc, o.name`,
@@ -117,8 +132,12 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: Deps) {
     const { id } = parse(z.object({ id: zUuid }), req.params);
     const { rows } = await deps.pools.owner.query(
       `select id, name, slug, segment, contact_email as "contactEmail", contact_phone as "contactPhone",
-              is_active as "isActive", created_at as "createdAt"
-         from organizations where id = $1`,
+              o.is_active as "isActive", o.created_at as "createdAt",
+              o.plan_name as "planName", o.plan_amount_cents as "planAmountCents", o.plan_interval_months as "planIntervalMonths",
+              to_char(o.access_until, 'YYYY-MM-DD') as "accessUntil", o.auto_suspend as "autoSuspend", o.grace_days as "graceDays",
+              o.suspended_reason as "suspendedReason", (o.billing_customer_id is not null) as "autoBilling", o.is_billing_org as "isBillingOrg",
+              (o.access_until - app.org_today(o.id)) as "accessDaysLeft"
+         from organizations o where o.id = $1`,
       [id],
     );
     if (!rows[0]) throw notFound();
@@ -140,7 +159,8 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: Deps) {
     );
     await asUser(deps, req, async (db) => {
       const r = await db.query(
-        `update organizations set name = coalesce($2, name), segment = coalesce($3, segment), is_active = coalesce($4, is_active)
+        `update organizations set name = coalesce($2, name), segment = coalesce($3, segment), is_active = coalesce($4, is_active),
+                suspended_reason = case when $4 is null then suspended_reason when $4 then null else 'manual' end
           where id = $1`,
         [id, body.name ?? null, body.segment ?? null, body.isActive ?? null],
       );
@@ -263,6 +283,140 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: Deps) {
       );
       if (!r.rowCount) throw notFound('Pedido não encontrado ou já decidido.');
       await audit(db, req, 'platform.request_rejected', 'access_request', id);
+    });
+    return { ok: true };
+  });
+
+  // ------------------------------------------------------------- plano e acesso
+
+  const zDateOrNull = z.union([zDate, z.null()]);
+
+  /** Plano da organização e liberação manual do acesso. */
+  app.put('/api/platform/orgs/:id/plan', async (req) => {
+    const me = requirePlatform(req);
+    const { id } = parse(z.object({ id: zUuid }), req.params);
+    const b = parse(
+      z
+        .object({
+          planName: zOptionalText(80),
+          amountCents: z.coerce.number().int().min(0).max(100_000_000).nullable(),
+          intervalMonths: zInterval,
+          accessUntil: zDateOrNull,
+          autoSuspend: z.boolean(),
+          graceDays: z.coerce.number().int().min(0).max(60),
+        })
+        .strict(),
+      req.body,
+    );
+    await withTx(deps.pools.owner, async (db) => {
+      const r = await db.query(
+        `update organizations set plan_name = $2, plan_amount_cents = $3, plan_interval_months = $4, access_until = $5,
+                auto_suspend = $6, grace_days = $7,
+                is_active = case when suspended_reason = 'inadimplencia' and ($5::date is null or $5::date >= app.org_today(id)) then true else is_active end,
+                suspended_reason = case when suspended_reason = 'inadimplencia' and ($5::date is null or $5::date >= app.org_today(id)) then null else suspended_reason end
+          where id = $1`,
+        [id, b.planName, b.amountCents, b.intervalMonths, b.accessUntil, b.autoSuspend, b.graceDays],
+      );
+      if (!r.rowCount) throw notFound();
+      await auditOrg(db, me.id, 'platform.plan_updated', id, req.ip, { accessUntil: b.accessUntil, autoSuspend: b.autoSuspend });
+    });
+    return { ok: true };
+  });
+
+  /** "Ativar plano": libera o acesso por N meses a partir de hoje (ou do fim do período atual) e reativa. */
+  app.post('/api/platform/orgs/:id/extend', async (req) => {
+    const me = requirePlatform(req);
+    const { id } = parse(z.object({ id: zUuid }), req.params);
+    const b = parse(z.object({ months: z.coerce.number().int().min(1).max(24) }).strict(), req.body);
+    const accessUntil = await withTx(deps.pools.owner, async (db) => {
+      const { rows } = await db.query<{ access_until: string }>(
+        `update organizations
+            set access_until = (greatest(coalesce(access_until, app.org_today(id)), app.org_today(id)) + make_interval(months => $2))::date,
+                is_active = true, suspended_reason = null
+          where id = $1 returning to_char(access_until, 'YYYY-MM-DD') as access_until`,
+        [id, b.months],
+      );
+      if (!rows[0]) throw notFound();
+      await auditOrg(db, me.id, 'platform.access_extended', id, req.ip, { months: b.months });
+      return rows[0].access_until;
+    });
+    return { ok: true, accessUntil };
+  });
+
+  /** Organização usada pela plataforma para cobrar os próprios clientes (ex.: a empresa do Eduardo). */
+  app.put('/api/platform/billing-org', async (req) => {
+    const me = requirePlatform(req);
+    const b = parse(z.object({ orgId: zUuid.nullable() }).strict(), req.body);
+    await withTx(deps.pools.owner, async (db) => {
+      await db.query('update organizations set is_billing_org = false where is_billing_org');
+      if (b.orgId) {
+        const r = await db.query('update organizations set is_billing_org = true where id = $1', [b.orgId]);
+        if (!r.rowCount) throw notFound();
+      }
+      await auditOrg(db, me.id, 'platform.billing_org', b.orgId, req.ip);
+    });
+    return { ok: true };
+  });
+
+  app.get('/api/platform/billing-org', async (req) => {
+    requirePlatform(req);
+    const { rows } = await deps.pools.owner.query('select id, name from organizations where is_billing_org');
+    return { org: rows[0] ?? null };
+  });
+
+  /**
+   * Cobrança automática do plano: cria (na organização de cobrança da
+   * plataforma) o cliente e a assinatura correspondentes. Os lembretes saem
+   * sozinhos e, quando o pagamento é registrado, o acesso é renovado
+   * automaticamente. Com suspensão automática, o acesso é bloqueado após o
+   * vencimento + tolerância.
+   */
+  app.post('/api/platform/orgs/:id/auto-billing', async (req) => {
+    const me = requirePlatform(req);
+    const { id } = parse(z.object({ id: zUuid }), req.params);
+    const b = parse(z.object({ enable: z.boolean(), firstDueDate: zDate.optional() }).strict(), req.body);
+    await withTx(deps.pools.owner, async (db) => {
+      const { rows } = await db.query<{
+        name: string; contact_email: string | null; contact_phone: string | null; document: string | null;
+        plan_name: string | null; plan_amount_cents: number | null; plan_interval_months: number;
+        billing_customer_id: string | null; is_billing_org: boolean; access_until: string | null;
+      }>('select *, to_char(access_until, \'YYYY-MM-DD\') as access_until from organizations where id = $1 for update', [id]);
+      const o = rows[0];
+      if (!o) throw notFound();
+      const billing = (await db.query<{ id: string }>('select id from organizations where is_billing_org')).rows[0];
+      if (!b.enable) {
+        if (o.billing_customer_id) {
+          await db.query(
+            `update charges set status = 'cancelada' where customer_id = $1 and status = 'aberta' and due_date >= app.org_today(organization_id)`,
+            [o.billing_customer_id],
+          );
+          await db.query(`update subscriptions set status = 'cancelada', cancelled_at = now() where customer_id = $1 and status <> 'cancelada'`, [
+            o.billing_customer_id,
+          ]);
+        }
+        await db.query('update organizations set billing_customer_id = null where id = $1', [id]);
+        await auditOrg(db, me.id, 'platform.auto_billing_off', id, req.ip);
+        return;
+      }
+      if (!billing) throw new AppError(409, 'conflict', 'Defina antes a organização de cobrança da plataforma (em Organizações).');
+      if (billing.id === id) throw new AppError(409, 'conflict', 'A organização de cobrança não pode cobrar a si mesma.');
+      if (!o.plan_amount_cents) throw new AppError(422, 'invalid', 'Defina o valor do plano antes de ativar a cobrança automática.');
+      if (o.billing_customer_id) throw new AppError(409, 'conflict', 'A cobrança automática já está ativa.');
+      const first = b.firstDueDate ?? o.access_until;
+      if (!first) throw new AppError(422, 'invalid', 'Informe a data do primeiro vencimento.');
+      const cust = await db.query<{ id: string }>(
+        `insert into customers (organization_id, name, email, phone, document, notes)
+         values ($1, $2, $3, $4, $5, 'Cliente da plataforma Venceu (cobrança automática do plano).') returning id`,
+        [billing.id, o.name.slice(0, 120), o.contact_email, o.contact_phone, o.document],
+      );
+      const sub = await db.query<{ id: string }>(
+        `insert into subscriptions (organization_id, customer_id, description, amount_cents, interval_months, next_due_date, billing_day)
+         values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+        [billing.id, cust.rows[0]!.id, `Plano ${o.plan_name ?? 'Venceu'}`.slice(0, 120), o.plan_amount_cents, o.plan_interval_months, first, Number(first.slice(8, 10))],
+      );
+      await db.query('select app.generate_charges($1, 30)', [sub.rows[0]!.id]);
+      await db.query('update organizations set billing_customer_id = $2, auto_suspend = true where id = $1', [id, cust.rows[0]!.id]);
+      await auditOrg(db, me.id, 'platform.auto_billing_on', id, req.ip, { firstDueDate: first });
     });
     return { ok: true };
   });

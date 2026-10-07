@@ -3,6 +3,7 @@ import type { Deps } from '../../lib/context.js';
 import type { Db } from '../../lib/db.js';
 import { decryptSecret, hmacHex } from '../../lib/secrets.js';
 import { OutboundError } from '../../lib/http.js';
+import { mediaKind } from '../../lib/media.js';
 
 export type WhatsAppMode = 'manual' | 'cloud_api' | 'webhook';
 
@@ -76,12 +77,24 @@ export async function sendWhatsApp(
   deps: Deps,
   org: { slug: string },
   c: ChannelConfig,
-  msg: { to: string; body: string; template?: WaTemplate | null; messageId?: string },
+  msg: { to: string; body: string; template?: WaTemplate | null; messageId?: string; media?: OutMedia | null },
 ): Promise<{ providerId: string | null }> {
   const digits = msg.to.replace(/\D/g, '');
   if (c.mode === 'cloud_api') {
     if (!c.phoneNumberId || !c.accessToken) throw new OutboundError('WhatsApp Cloud API não configurada.');
-    const payload = msg.template
+    const kind = msg.media ? mediaKind(msg.media.mime) : null;
+    const payload = msg.media && kind
+      ? {
+          messaging_product: 'whatsapp',
+          to: digits,
+          type: kind,
+          [kind]: {
+            link: msg.media.url,
+            ...(kind !== 'audio' && msg.body ? { caption: msg.body.slice(0, 1024) } : {}),
+            ...(kind === 'document' ? { filename: msg.media.name } : {}),
+          },
+        }
+      : msg.template
       ? {
           messaging_product: 'whatsapp',
           to: digits,
@@ -122,6 +135,7 @@ export async function sendWhatsApp(
       to: msg.to,
       text: msg.body,
       template: msg.template ?? null,
+      media: msg.media ? { url: msg.media.url, mime: msg.media.mime, name: msg.media.name, kind: mediaKind(msg.media.mime) } : null,
     });
     const res = await deps.fetch(c.webhookUrl, {
       method: 'POST',
@@ -143,4 +157,29 @@ export async function sendWhatsApp(
     return { providerId };
   }
   throw new OutboundError('Envio automático de WhatsApp não configurado (modo manual).');
+}
+
+export interface OutMedia {
+  url: string;
+  mime: string;
+  name: string;
+}
+
+/**
+ * Texto + anexo. Na API oficial: imagem/PDF levam o texto como legenda (até
+ * 1024 caracteres); áudio vai em mensagem separada, depois do texto. No
+ * webhook, tudo segue numa única chamada (o provedor decide como entregar).
+ */
+export async function sendWhatsAppWithMedia(
+  deps: Deps,
+  org: { slug: string },
+  c: ChannelConfig,
+  msg: { to: string; body: string; template?: WaTemplate | null; messageId?: string; media?: OutMedia | null },
+) {
+  if (!msg.media || c.mode !== 'cloud_api') return sendWhatsApp(deps, org, c, msg);
+  const kind = mediaKind(msg.media.mime);
+  if (!msg.template && kind !== 'audio' && msg.body.length <= 1024) return sendWhatsApp(deps, org, c, msg);
+  const first = msg.body || msg.template ? await sendWhatsApp(deps, org, c, { ...msg, media: null }) : null;
+  const second = await sendWhatsApp(deps, org, c, { to: msg.to, body: '', media: msg.media });
+  return { providerId: first?.providerId ?? second.providerId };
 }

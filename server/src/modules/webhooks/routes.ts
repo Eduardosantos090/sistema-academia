@@ -4,7 +4,8 @@ import type { Deps } from '../../lib/context.js';
 import { safeEqual } from '../../lib/crypto.js';
 import { hmacHex } from '../../lib/secrets.js';
 import { normalizePhone } from '../../lib/normalize.js';
-import { loadChannels, sendWhatsApp, signWebhook } from '../channels/service.js';
+import { loadChannels, sendWhatsAppWithMedia, signWebhook } from '../channels/service.js';
+import { mediaKind, mediaUrl } from '../../lib/media.js';
 import { handleIncoming, loadBotOrg } from '../bot/engine.js';
 
 /**
@@ -75,8 +76,9 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: Deps) {
         m.text?.body ?? m.button?.text ?? m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title ?? `[${m.type ?? 'mensagem'} recebida]`;
       const r = await handleIncoming(deps, org, phone, String(text).slice(0, 4096), m.id ? String(m.id).slice(0, 200) : null);
       if (c.mode === 'cloud_api') {
-        for (const reply of r.replies) {
-          await sendWhatsApp(deps, org, c, { to: phone, body: reply }).catch((err) =>
+        for (const [i, reply] of r.replies.entries()) {
+          const media = i === 0 && r.media ? { url: mediaUrl(deps.config.appUrl, r.media), mime: r.media.mime, name: r.media.name } : null;
+          await sendWhatsAppWithMedia(deps, org, c, { to: phone, body: reply, media }).catch((err) =>
             req.log.warn({ err: { message: (err as Error).message } }, 'falha ao responder pelo WhatsApp'),
           );
         }
@@ -109,6 +111,9 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: Deps) {
     const phone = normalizePhone(p.data.from.startsWith('+') ? p.data.from : `+${p.data.from.replace(/\D/g, '')}`);
     if (!phone) return reply.code(422).send({ error: { code: 'invalid', message: 'Telefone inválido.' } });
     const r = await handleIncoming(deps, org, phone, p.data.text, p.data.id ?? null);
-    return { replies: r.replies, intent: r.intent };
+    const media = r.media
+      ? { url: mediaUrl(deps.config.appUrl, r.media), mime: r.media.mime, name: r.media.name, kind: mediaKind(r.media.mime) }
+      : null;
+    return { replies: r.replies, media, intent: r.intent };
   });
 }

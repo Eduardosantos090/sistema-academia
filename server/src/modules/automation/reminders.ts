@@ -18,6 +18,7 @@ interface DueRow {
   subject: string | null;
   wa_template_name: string | null;
   wa_template_lang: string;
+  media_id: string | null;
   charge_id: string;
   description: string;
   amount_cents: number;
@@ -57,7 +58,7 @@ export async function queueReminders(deps: Deps, onlyOrg?: string) {
     const emailOk = emailAvailable(deps, channels);
     const { rows } = await deps.pools.owner.query<DueRow>(
       `select r.id as rule_id, r.offset_days, r.send_whatsapp, r.send_email,
-              t.body, t.subject, t.wa_template_name, t.wa_template_lang,
+              t.body, t.subject, t.wa_template_name, t.wa_template_lang, t.media_id,
               c.id as charge_id, c.description, c.amount_cents, to_char(c.due_date, 'YYYY-MM-DD') as due_date, c.payment_link,
               cu.id as customer_id, cu.name, cu.email, cu.phone, cu.whatsapp_opt_in, cu.email_opt_in
          from reminder_rules r
@@ -89,8 +90,8 @@ export async function queueReminders(deps: Deps, onlyOrg?: string) {
       for (const t of targets) {
         const res = await deps.pools.owner.query(
           `insert into messages (organization_id, customer_id, charge_id, rule_id, channel, kind, to_address, subject, body,
-                                 wa_template, status, dedupe_key)
-           values ($1, $2, $3, $4, $5, 'lembrete', $6, $7, $8, $9, $10, $11)
+                                 wa_template, status, dedupe_key, media_id)
+           values ($1, $2, $3, $4, $5, 'lembrete', $6, $7, $8, $9, $10, $11, $12)
            on conflict (dedupe_key) do nothing`,
           [
             org.id,
@@ -104,6 +105,7 @@ export async function queueReminders(deps: Deps, onlyOrg?: string) {
             t.channel === 'whatsapp' && waTemplate ? JSON.stringify(waTemplate) : null,
             t.status,
             `rule:${r.rule_id}:${r.charge_id}:${r.due_date}:${t.channel}`,
+            r.media_id,
           ],
         );
         queued += res.rowCount ?? 0;
