@@ -49,6 +49,9 @@ const schema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'silent']).default('info'),
 });
 
+/** Nomes das variáveis reconhecidas (públicos; usados no diagnóstico de configuração). */
+export const CONFIG_KEYS = Object.keys(schema.shape);
+
 export type Config = z.infer<typeof schema> & {
   isProd: boolean;
   secureCookies: boolean;
