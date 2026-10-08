@@ -18,8 +18,9 @@ envia os lembretes do próprio endereço, e o WhatsApp de cada uma é configurad
 
 ## PIX automático (AbacatePay)
 
-Em **Configurações → PIX automático**, cole a chave da API da AbacatePay (painel da AbacatePay → Integração → Chaves de API)
-e clique em **Ligar PIX automático**. Comece com uma chave de **teste** (`abc_dev_…`) para validar o fluxo sem cobrar ninguém.
+Em **Configurações → PIX automático**, cole a chave da **API v2** da AbacatePay (painel da AbacatePay → Integração → Chaves de API)
+e clique em **Ligar PIX automático**. Comece com uma chave em **modo de teste** para validar o fluxo sem cobrar ninguém.
+(As chaves da v1 e da v2 da AbacatePay não são intercambiáveis: use uma chave v2.)
 
 - Cada lembrete passa a levar um **link de pagamento** (variáveis `{{link_pagamento}}` e `{{instrucoes_pagamento}}`). O link abre
   uma página com QR Code e PIX copia e cola, gerados na hora pela AbacatePay. O botão de copiar link também aparece em **Cobranças**.
@@ -29,6 +30,21 @@ e clique em **Ligar PIX automático**. Comece com uma chave de **teste** (`abc_d
 - A baixa só acontece depois de o Venceu consultar a AbacatePay com a sua chave — um aviso falso não dá baixa em nada.
 - No modo de teste, a página de pagamento mostra **Simular pagamento**, para conferir o fluxo completo.
 - Na empresa de cobrança da plataforma (Eduardo), a baixa de uma mensalidade renova automaticamente o acesso da academia.
+
+## Venda online da assinatura (administração do Venceu)
+
+Em **Plataforma → Venda online**:
+
+1. Cole a chave da API v2 da AbacatePay (permissões de clientes, produtos e assinaturas) e o **ID do produto** de assinatura
+   (ex.: `prod_XkFSP4HpB41XDPPXyMtKj5am`). O preço e o ciclo vêm do produto na AbacatePay.
+2. Escolha as formas de pagamento (cartão; PIX Automático só se estiver habilitado na sua conta AbacatePay) e clique em
+   **Ligar venda online**.
+3. Na AbacatePay, em Integração → Webhooks, cadastre a URL e o segredo mostrados na tela, com os eventos de assinatura.
+
+A página de vendas passa a mostrar o preço e o botão **Assinar**. A pessoa preenche os dados da empresa e cria a senha, paga na
+AbacatePay e a conta é criada automaticamente (com modelos, regras e assistente prontos) — ela já entra com o e-mail e a senha.
+Cada renovação paga estende o acesso por mais um período; se a assinatura for cancelada ou não for paga, o acesso termina no fim
+do período (mais a tolerância) e a conta é suspensa. A lista de cadastros aparece na mesma tela.
 
 ## Importar clientes de uma planilha
 Em **Clientes → Importar planilha**: baixe o modelo ou use a sua planilha salva como **CSV** (Excel: Arquivo → Salvar como → CSV).

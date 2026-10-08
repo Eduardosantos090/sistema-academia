@@ -109,7 +109,7 @@ export async function payPage(deps: Deps, token: string): Promise<PayPage | null
       const created = await createPix(deps, cfg.apiKey, {
         amountCents: c.amount_cents,
         expiresInSeconds: PIX_TTL_SECONDS,
-        description: c.description,
+        description: `${c.description} – ${c.org_name}`,
       });
       if (created.amount !== c.amount_cents) throw new OutboundError('AbacatePay: valor do PIX diferente da cobrança.');
       const expires = new Date(created.expiresAt);

@@ -6,6 +6,7 @@ import { AppLayout } from './layout/AppLayout';
 import { LandingPage } from './pages/public/LandingPage';
 import { UnsubscribePage } from './pages/public/UnsubscribePage';
 import { PayPage } from './pages/public/PayPage';
+import { SignupDonePage, SignupPage } from './pages/public/SignupPage';
 import { LoginPage } from './pages/auth/LoginPage';
 import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/auth/ResetPasswordPage';
@@ -23,6 +24,7 @@ import { SettingsPage } from './pages/settings/SettingsPage';
 import { OrgsPage } from './pages/platform/OrgsPage';
 import { OrgPage } from './pages/platform/OrgPage';
 import { RequestsPage } from './pages/platform/RequestsPage';
+import { SalesPage } from './pages/platform/SalesPage';
 import { AuditPage } from './pages/AuditPage';
 import { AccountPage } from './pages/AccountPage';
 
@@ -70,6 +72,8 @@ export function App() {
       <Route path="/convite" element={<AcceptInvitePage />} />
       <Route path="/descadastrar" element={<UnsubscribePage />} />
       <Route path="/pagar/:token" element={<PayPage />} />
+      <Route path="/assinar" element={<SignupPage />} />
+      <Route path="/assinar/concluido" element={<SignupDonePage />} />
       <Route
         path="/app"
         element={
@@ -91,6 +95,7 @@ export function App() {
         <Route path="auditoria" element={<RequireAuth owner><AuditPage /></RequireAuth>} />
         <Route path="plataforma" element={<RequireAuth platform><OrgsPage /></RequireAuth>} />
         <Route path="plataforma/organizacoes/:id" element={<RequireAuth platform><OrgPage /></RequireAuth>} />
+        <Route path="plataforma/vendas" element={<RequireAuth platform><SalesPage /></RequireAuth>} />
         <Route path="plataforma/pedidos" element={<RequireAuth platform><RequestsPage /></RequireAuth>} />
         <Route path="plataforma/auditoria" element={<RequireAuth platform><AuditPage /></RequireAuth>} />
         <Route path="conta" element={<AccountPage />} />

@@ -16,9 +16,11 @@ class FakeAbacate {
     const auth = req.headers?.authorization ?? '';
     if (!this.validKeys.has(auth.replace(/^Bearer /, ''))) return { status: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
     const u = new URL(url);
-    if (u.pathname === '/v1/store/get') return ok({ id: 'store_1', name: 'Loja Teste' });
-    if (u.pathname === '/v1/pixQrCode/create') {
-      const b = JSON.parse(req.body!);
+    if (u.pathname === '/v2/stores/get') return ok({ id: 'store_1', name: 'Loja Teste' });
+    if (u.pathname === '/v2/transparents/create') {
+      const raw = JSON.parse(req.body!);
+      if (raw.method !== 'PIX') return { status: 400, body: '{"error":"method"}' };
+      const b = raw.data;
       const id = `pix_char_${++pixSeq}TESTE`;
       const devMode = auth.includes('abc_dev_');
       this.pix.set(id, { amount: b.amount, status: 'PENDING', devMode });
@@ -30,8 +32,8 @@ class FakeAbacate {
     }
     const id = u.searchParams.get('id') ?? '';
     const p = this.pix.get(id);
-    if (u.pathname === '/v1/pixQrCode/check') return p ? ok({ status: p.status, expiresAt: new Date(Date.now() + 3600_000).toISOString() }) : { status: 404, body: '{"error":"Not found"}' };
-    if (u.pathname === '/v1/pixQrCode/simulate-payment' && p?.devMode) {
+    if (u.pathname === '/v2/transparents/check') return p ? ok({ status: p.status, expiresAt: new Date(Date.now() + 3600_000).toISOString() }) : { status: 404, body: '{"error":"Not found"}' };
+    if (u.pathname === '/v2/transparents/simulate-payment' && p?.devMode) {
       p.status = 'PAID';
       return ok({ id, status: 'PAID' });
     }
@@ -62,7 +64,7 @@ async function setupOnlineOrg(key = 'abc_dev_CHAVEVALIDA123') {
   return { ...o, settings: s, customerId: cid, chargeId, token: rows[0].pay_token as string };
 }
 
-const abacateCalls = (path: string) => ctx.http.calls.filter((c) => c.url.startsWith(`https://api.abacatepay.com/v1${path}`));
+const abacateCalls = (path: string) => ctx.http.calls.filter((c) => c.url.startsWith(`https://api.abacatepay.com/v2${path}`));
 
 describe('PIX automático (AbacatePay)', () => {
   it('somente o responsável configura; chave recusada não é salva; segredos não vazam', async () => {
@@ -95,10 +97,10 @@ describe('PIX automático (AbacatePay)', () => {
     expect(JSON.stringify(p1)).not.toMatch(/Paula|95555/); // sem dados pessoais do cliente
     const p2 = json(await anon.get(`/api/pay/${o.token}`));
     expect(p2.pix.brCode).toBe(p1.pix.brCode);
-    const created = abacateCalls('/pixQrCode/create');
+    const created = abacateCalls('/transparents/create');
     expect(created).toHaveLength(1);
     expect(created[0]!.req.headers!.authorization).toBe('Bearer abc_dev_CHAVEVALIDA123');
-    expect(JSON.parse(created[0]!.req.body!).description.length).toBeLessThanOrEqual(37);
+    expect(JSON.parse(created[0]!.req.body!).data.description.length).toBeLessThanOrEqual(500);
 
     expect((await anon.get(`/api/pay/${'0'.repeat(64)}`)).statusCode).toBe(404);
     expect((await anon.get('/api/pay/abc')).statusCode).toBeGreaterThanOrEqual(400);
@@ -115,6 +117,8 @@ describe('PIX automático (AbacatePay)', () => {
 
     expect((await anon.post(`${hook}?webhookSecret=errado`, body)).statusCode).toBe(403);
     expect((await anon.post(hook, body)).statusCode).toBe(403);
+    // Assinatura HMAC presente e inválida: recusado mesmo com o segredo certo.
+    expect((await anon.request('POST', `${hook}?webhookSecret=${o.settings.webhookSecret}`, body, { 'x-webhook-signature': 'invalida' })).statusCode).toBe(403);
     // Aviso forjado (provedor ainda diz PENDING): nada muda.
     const forged = await anon.post(`${hook}?webhookSecret=${o.settings.webhookSecret}`, body);
     expect(forged.statusCode).toBe(200);
@@ -172,11 +176,11 @@ describe('PIX automático (AbacatePay)', () => {
     const cid = await createCustomer(plain.owner);
     const ch = await createCharge(plain.owner, cid);
     const t = (await ctx.owner.query('select pay_token from charges where id = $1', [ch])).rows[0].pay_token;
-    const before = abacateCalls('/pixQrCode/create').length;
+    const before = abacateCalls('/transparents/create').length;
     const page = json(await anon.get(`/api/pay/${t}`));
     expect(page.pix).toBeNull();
     expect(page.unavailable).toBeTruthy();
-    expect(abacateCalls('/pixQrCode/create').length).toBe(before);
+    expect(abacateCalls('/transparents/create').length).toBe(before);
     // E o lembrete dessa organização não ganha link de pagamento do Venceu.
     const send = json(await plain.owner.post(`/api/charges/${ch}/send`, { channel: 'whatsapp' }));
     expect((await ctx.owner.query('select body from messages where id = $1', [send.messageId])).rows[0].body).not.toContain('/pagar/');

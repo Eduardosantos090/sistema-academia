@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api, ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
@@ -6,7 +7,7 @@ import { brand } from '../../brand';
 import { Alert, Button, Checkbox, SelectField, TextArea, TextField, fieldErrors, usePageTitle } from '../../components/ui';
 import { Icon, WhatsAppIcon, type IconName } from '../../components/icons';
 import { BrandMark } from '../../layout/AppLayout';
-import { segmentLabel } from '../../lib/format';
+import { fmtCents, segmentLabel } from '../../lib/format';
 
 const FEATURES: { icon: IconName | 'wa'; title: string; text: string }[] = [
   { icon: 'calendarCheck', title: 'Avisos automáticos', text: 'Lembretes antes, no dia e depois do vencimento — no horário que você escolher, sem precisar lembrar de nada.' },
@@ -24,9 +25,28 @@ const STEPS = [
   ['Acompanhe e receba', 'Dê baixa em um clique e o cliente recebe a confirmação de pagamento.'],
 ];
 
+export interface PublicPlan {
+  available: boolean; planName: string; priceCents: number; intervalMonths: number; methods: string[];
+}
+export const usePublicPlan = () =>
+  useQuery({ queryKey: ['public-plan'], queryFn: () => api.get<PublicPlan>('/api/public/plan'), staleTime: 60_000, retry: false });
+export const perInterval = (m: number) => (m === 1 ? 'mês' : m === 12 ? 'ano' : `${m} meses`);
+
+const PLAN_ITEMS = [
+  'Clientes e cobranças ilimitados',
+  'Lembretes automáticos por WhatsApp e e-mail',
+  'Assistente virtual (chatbot) com texto, imagem e áudio',
+  'Intervalo entre disparos no seu critério',
+  'PIX automático com baixa sozinha',
+  'Painel de quem recebeu e de quem falta',
+  'Equipe com permissões e auditoria',
+];
+
 export function LandingPage() {
   usePageTitle('Lembretes de vencimento com automação de chatbot');
   const { user } = useAuth();
+  const plan = usePublicPlan().data;
+  const price = plan ? `${fmtCents(plan.priceCents).replace(',00', '')}/${perInterval(plan.intervalMonths)}` : null;
   return (
     <div className="landing">
       <header className="l-nav">
@@ -36,7 +56,7 @@ export function LandingPage() {
         <nav aria-label="Navegação do site">
           <a className="l-link" href="#recursos">Recursos</a>
           <a className="l-link" href="#como-funciona">Como funciona</a>
-          <a className="l-link" href="#comecar">Começar</a>
+          <a className="l-link" href="#planos">Preço</a>
           {user ? (
             <Link to="/app" className="btn btn-primary">Abrir painel</Link>
           ) : (
@@ -58,9 +78,15 @@ export function LandingPage() {
               mensalidade.
             </p>
             <div className="row">
-              <a href="#comecar" className="btn btn-primary btn-lg">
-                Quero usar o Venceu <Icon name="arrowRight" />
-              </a>
+              {plan?.available ? (
+                <Link to="/assinar" className="btn btn-primary btn-lg">
+                  Assinar por {price} <Icon name="arrowRight" />
+                </Link>
+              ) : (
+                <a href="#comecar" className="btn btn-primary btn-lg">
+                  Quero usar o Venceu <Icon name="arrowRight" />
+                </a>
+              )}
               <a href="#como-funciona" className="btn btn-lg">Ver como funciona</a>
             </div>
           </div>
@@ -129,11 +155,48 @@ export function LandingPage() {
           </div>
         </section>
 
+        <section className="l-section" id="planos" aria-labelledby="plan-title">
+          <div className="l-pricing">
+            <div>
+              <div className="eyebrow">Preço</div>
+              <h2 id="plan-title" style={{ marginTop: 8 }}>Um plano, tudo incluso</h2>
+              <p className="section-lead">
+                Sem taxa de adesão, sem fidelidade e sem limite de clientes. Cancele quando quiser — o acesso continua até o fim do
+                período pago.
+              </p>
+            </div>
+            <article className="card l-plan" aria-label={`Plano ${plan?.planName ?? 'Venceu Mensal'}`}>
+              <div className="l-plan-name">{plan?.planName ?? 'Venceu Mensal'}</div>
+              <div className="l-plan-price">
+                <span className="num">{fmtCents(plan?.priceCents ?? 5000).replace(',00', '')}</span>
+                <span className="muted">/{perInterval(plan?.intervalMonths ?? 1)}</span>
+              </div>
+              <ul className="l-plan-items">
+                {PLAN_ITEMS.map((t) => (
+                  <li key={t}><span className="green"><Icon name="checkCircle" size={18} /></span> {t}</li>
+                ))}
+              </ul>
+              {plan?.available ? (
+                <>
+                  <Link to="/assinar" className="btn btn-primary btn-lg" style={{ width: '100%', justifyContent: 'center' }}>
+                    Assinar agora <Icon name="arrowRight" />
+                  </Link>
+                  <p className="tiny muted" style={{ margin: '10px 0 0', textAlign: 'center' }}>
+                    Pagamento seguro pela AbacatePay{plan.methods.includes('PIX') ? ' · cartão ou PIX' : ' · cartão de crédito'}. Seu acesso é liberado na hora.
+                  </p>
+                </>
+              ) : (
+                <a href="#comecar" className="btn btn-primary btn-lg" style={{ width: '100%', justifyContent: 'center' }}>Quero contratar</a>
+              )}
+            </article>
+          </div>
+        </section>
+
         <section className="l-section" id="comecar" aria-labelledby="cta-title">
           <div className="l-cta">
             <div>
               <div className="eyebrow">Comece agora</div>
-              <h2 id="cta-title" style={{ marginTop: 8 }}>Quero usar o Venceu na minha empresa</h2>
+              <h2 id="cta-title" style={{ marginTop: 8 }}>{plan?.available ? 'Prefere falar com a gente antes?' : 'Quero usar o Venceu na minha empresa'}</h2>
               <p className="section-lead" style={{ marginBottom: 18 }}>
                 Envie seus dados e nossa equipe libera o acesso com a configuração inicial pronta: modelos de mensagem, regras
                 de lembrete e assistente virtual.

@@ -27,7 +27,7 @@ export function slugify(name: string) {
   return base.length >= 3 ? base : `org-${base || 'nova'}`;
 }
 
-async function uniqueSlug(deps: Deps, wanted: string) {
+export async function uniqueSlug(deps: Deps, wanted: string) {
   let slug = wanted;
   for (let i = 2; i < 50; i++) {
     const { rowCount } = await deps.pools.owner.query('select 1 from organizations where slug = $1', [slug]);
@@ -109,6 +109,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: Deps) {
               o.plan_name as "planName", o.plan_amount_cents as "planAmountCents", o.plan_interval_months as "planIntervalMonths",
               to_char(o.access_until, 'YYYY-MM-DD') as "accessUntil", o.auto_suspend as "autoSuspend", o.grace_days as "graceDays",
               o.suspended_reason as "suspendedReason", (o.billing_customer_id is not null) as "autoBilling", o.is_billing_org as "isBillingOrg",
+              o.subscription_status as "subscriptionStatus",
               (o.access_until - app.org_today(o.id)) as "accessDaysLeft"
          from organizations o left join org_channels ch on ch.organization_id = o.id
         where ($1::text is null or o.name ilike '%' || $1 || '%' or o.slug ilike '%' || $1 || '%')
@@ -136,6 +137,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: Deps) {
               o.plan_name as "planName", o.plan_amount_cents as "planAmountCents", o.plan_interval_months as "planIntervalMonths",
               to_char(o.access_until, 'YYYY-MM-DD') as "accessUntil", o.auto_suspend as "autoSuspend", o.grace_days as "graceDays",
               o.suspended_reason as "suspendedReason", (o.billing_customer_id is not null) as "autoBilling", o.is_billing_org as "isBillingOrg",
+              o.subscription_status as "subscriptionStatus",
               (o.access_until - app.org_today(o.id)) as "accessDaysLeft"
          from organizations o where o.id = $1`,
       [id],

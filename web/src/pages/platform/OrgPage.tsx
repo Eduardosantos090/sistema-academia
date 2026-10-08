@@ -13,7 +13,7 @@ interface OrgDetail {
   createdAt: string; users: TeamUser[]; mailMode: string;
   planName: string | null; planAmountCents: number | null; planIntervalMonths: number; accessUntil: string | null;
   accessDaysLeft: number | null; autoSuspend: boolean; graceDays: number; suspendedReason: string | null;
-  autoBilling: boolean; isBillingOrg: boolean;
+  autoBilling: boolean; isBillingOrg: boolean; subscriptionStatus?: 'ativa' | 'cancelada' | null;
 }
 
 export function OrgPage() {
@@ -186,6 +186,13 @@ function PlanCard({ o, onChanged }: { o: OrgDetail; onChanged: () => void }) {
     <section className="card">
       <div className="card-header">
         <h2>Plano e acesso</h2>
+        {o.subscriptionStatus && (
+          <Alert kind={o.subscriptionStatus === 'ativa' ? 'success' : 'warning'}>
+            {o.subscriptionStatus === 'ativa'
+              ? 'Assinatura contratada pelo site (AbacatePay): cada renovação paga estende o acesso automaticamente.'
+              : 'Assinatura cancelada na AbacatePay: o acesso termina na data abaixo (mais a tolerância) e a conta é suspensa.'}
+          </Alert>
+        )}
         <span className="row-sm">
           <AccessBadge o={o} />
           {o.accessUntil && <span className="muted small">até {fmtDate(o.accessUntil)}</span>}

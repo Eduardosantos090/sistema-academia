@@ -7,7 +7,7 @@ import { parse } from '../../lib/validate.js';
 import { newToken, safeEqual } from '../../lib/crypto.js';
 import { encryptSecret } from '../../lib/secrets.js';
 import { OutboundError } from '../../lib/http.js';
-import { getStore, simulatePixPayment, zAbacateKeyRe } from './abacatepay.js';
+import { getStore, signatureOk, simulatePixPayment, zAbacateKeyRe } from './abacatepay.js';
 import { loadAbacate, payPage, pendingByProviderIds, refreshPix } from './service.js';
 
 const zToken = z.object({ token: z.string().regex(/^[0-9a-f]{64}$/) });
@@ -110,6 +110,7 @@ export function registerPaymentRoutes(app: FastifyInstance, deps: Deps) {
     const raw = (req.query as Record<string, unknown>).webhookSecret;
     const given = (Array.isArray(raw) ? raw : [raw]).filter((v): v is string => typeof v === 'string').slice(0, 3);
     if (!cfg?.webhookSecret || !given.some((v) => safeEqual(v, cfg.webhookSecret!))) return deny(reply);
+    if (!signatureOk(req.rawBody, req.headers['x-webhook-signature'])) return deny(reply);
     await deps.limiters.webhookOrg.consume(`abacate:${org.id}`);
     const pending = await pendingByProviderIds(deps, org.id, [...collectIds(req.body)]);
     let paid = 0;

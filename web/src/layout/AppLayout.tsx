@@ -120,6 +120,7 @@ export function AppLayout() {
             <>
               <div className="nav-section">Plataforma Venceu</div>
               <Item to="/app/plataforma" end icon="building" label="Organizações" />
+              <Item to="/app/plataforma/vendas" icon="dollar" label="Venda online" />
               <Item to="/app/plataforma/pedidos" icon="inbox" label="Pedidos de acesso" />
               <Item to="/app/plataforma/auditoria" icon="shield" label="Auditoria geral" />
             </>
