@@ -44,7 +44,11 @@ export function SignupPage() {
     }
   };
 
-  if (plan.isLoading) return <AuthShell title="Assinar o Venceu"><Loading /></AuthShell>;
+  const linkUrl = plan.data?.mode === 'link' ? plan.data.checkoutUrl : null;
+  useEffect(() => {
+    if (linkUrl) window.location.replace(linkUrl);
+  }, [linkUrl]);
+  if (plan.isLoading || linkUrl) return <AuthShell title="Assinar o Venceu"><Loading label="Abrindo o pagamento…" /></AuthShell>;
   const p = plan.data;
   if (!p?.available) {
     return (

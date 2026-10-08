@@ -169,9 +169,36 @@ export async function createSubscriptionCheckout(
   return { id: d.id, url: d.url };
 }
 
+export async function getCustomer(deps: Deps, apiKey: string, id: string) {
+  const d = await abacateCall<Record<string, unknown>>(deps, apiKey, 'GET', `/customers/get?id=${q(id)}`);
+  const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+  return { id, email: str(d.email, 254), name: str(d.name, 120), cellphone: str(d.cellphone, 40), taxId: str(d.taxId, 20) };
+}
+
+/** Assinaturas ativas geradas por um checkout (ex.: link fixo criado no painel), mais recentes primeiro. */
+export async function listSubscriptionsByCheckout(deps: Deps, apiKey: string, checkoutId: string) {
+  const d = await abacateCall<unknown>(deps, apiKey, 'GET', `/subscriptions/list?checkoutId=${q(checkoutId)}&status=ACTIVE&limit=100`);
+  if (!Array.isArray(d)) throw new OutboundError('AbacatePay: resposta inesperada.');
+  return d.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object').map(toSubscription);
+}
+
+function toSubscription(d: Record<string, unknown>): AbacateSubscription {
+  if (typeof d.id !== 'string' || !ID_RE.test(d.id)) throw new OutboundError('AbacatePay: resposta inesperada.');
+  return {
+    id: d.id,
+    checkoutId: typeof d.checkoutId === 'string' ? d.checkoutId : null,
+    customerId: typeof d.customerId === 'string' && ID_RE.test(d.customerId) ? d.customerId : null,
+    status: String(d.status ?? ''),
+    amount: Number(d.amount),
+    method: typeof d.method === 'string' ? d.method : null,
+    devMode: !!d.devMode,
+  };
+}
+
 export interface AbacateSubscription {
   id: string;
   checkoutId: string | null;
+  customerId: string | null;
   status: string;
   amount: number;
   method: string | null;
@@ -181,16 +208,7 @@ export interface AbacateSubscription {
 /** Assinatura consultada no provedor por id (subs_...) ou pelo nosso externalId. */
 export async function getSubscription(deps: Deps, apiKey: string, by: { id?: string; externalId?: string }): Promise<AbacateSubscription> {
   const qs = by.id ? `id=${q(by.id)}` : `externalId=${q(by.externalId!)}`;
-  const d = await abacateCall<Record<string, unknown>>(deps, apiKey, 'GET', `/subscriptions/get?${qs}`);
-  if (typeof d.id !== 'string' || !ID_RE.test(d.id)) throw new OutboundError('AbacatePay: resposta inesperada.');
-  return {
-    id: d.id,
-    checkoutId: typeof d.checkoutId === 'string' ? d.checkoutId : null,
-    status: String(d.status ?? ''),
-    amount: Number(d.amount),
-    method: typeof d.method === 'string' ? d.method : null,
-    devMode: !!d.devMode,
-  };
+  return toSubscription(await abacateCall<Record<string, unknown>>(deps, apiKey, 'GET', `/subscriptions/get?${qs}`));
 }
 
 // ------------------------------------------------------------------ webhooks

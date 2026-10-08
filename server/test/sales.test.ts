@@ -13,9 +13,10 @@ const PRODUCT = 'prod_XkFSP4HpB41XDPPXyMtKj5am';
 
 /** AbacatePay v2 simulada para assinaturas. */
 class FakeAbacate {
-  subs = new Map<string, { id: string; checkoutId: string; externalId: string; status: string; amount: number }>();
+  subs = new Map<string, { id: string; checkoutId: string; externalId: string; customerId: string; status: string; amount: number }>();
   checkouts = new Map<string, { externalId: string; customerId: string; methods: string[] }>();
   productCycle: string | null = 'MONTHLY';
+  customers = new Map<string, Record<string, unknown>>();
   handle(url: string, req: HttpRequest) {
     if (req.headers?.authorization !== `Bearer ${KEY}`) return { status: 401, body: '{"error":"Unauthorized"}' };
     const u = new URL(url);
@@ -27,6 +28,14 @@ class FakeAbacate {
           ? ok({ id: PRODUCT, name: 'Venceu Mensal', price: 5000, cycle: this.productCycle, status: 'ACTIVE', devMode: true })
           : { status: 404, body: '{"error":"Product not found"}' };
       case '/v2/customers/create': return ok({ id: `cust_${++seq}`, email: JSON.parse(req.body!).email });
+      case '/v2/customers/get': {
+        const c = this.customers.get(u.searchParams.get('id') ?? '');
+        return c ? ok(c) : { status: 404, body: '{"error":"Customer not found"}' };
+      }
+      case '/v2/subscriptions/list': {
+        const bill = u.searchParams.get('checkoutId');
+        return { status: 200, body: JSON.stringify({ data: [...this.subs.values()].filter((x) => x.checkoutId === bill && x.status === 'ACTIVE').map((x) => ({ ...x, method: 'CARD', devMode: true })), error: null, pagination: { hasMore: false, next: null, before: null } }) };
+      }
       case '/v2/subscriptions/create': {
         const b = JSON.parse(req.body!);
         if (b.items?.[0]?.id !== PRODUCT || b.items.length !== 1) return { status: 400, body: '{"error":"items"}' };
@@ -38,7 +47,7 @@ class FakeAbacate {
         const byId = u.searchParams.get('id');
         const byExt = u.searchParams.get('externalId');
         const s = [...this.subs.values()].find((x) => (byId && x.id === byId) || (byExt && x.externalId === byExt));
-        return s ? ok({ id: s.id, checkoutId: s.checkoutId, customerId: 'c', amount: s.amount, status: s.status, method: 'CARD', coupons: [], devMode: true, trialDays: null, trialEndsAt: null, retryPolicy: {}, createdAt: '', updatedAt: '' })
+        return s ? ok({ id: s.id, checkoutId: s.checkoutId, customerId: s.customerId, amount: s.amount, status: s.status, method: 'CARD', coupons: [], devMode: true, trialDays: null, trialEndsAt: null, retryPolicy: {}, createdAt: '', updatedAt: '' })
           : { status: 404, body: '{"error":"Subscription not found"}' };
       }
     }
@@ -48,7 +57,15 @@ class FakeAbacate {
   pay(checkoutId: string) {
     const c = this.checkouts.get(checkoutId)!;
     const id = `subs_${++seq}`;
-    this.subs.set(id, { id, checkoutId, externalId: c.externalId, status: 'ACTIVE', amount: 5000 });
+    this.subs.set(id, { id, checkoutId, externalId: c.externalId, customerId: c.customerId, status: 'ACTIVE', amount: 5000 });
+    return id;
+  }
+  /** Alguém paga o link fixo criado no painel (sem cadastro prévio no site). */
+  payLink(bill: string, customer: { name: string; email: string; cellphone?: string }) {
+    const cid = `cust_${++seq}`;
+    this.customers.set(cid, { id: cid, ...customer });
+    const id = `subs_${++seq}`;
+    this.subs.set(id, { id, checkoutId: bill, externalId: '', customerId: cid, status: 'ACTIVE', amount: 5000 });
     return id;
   }
 }
@@ -86,7 +103,7 @@ describe('venda da assinatura do Venceu', () => {
     const s = await configure();
     expect(s).toMatchObject({ enabled: true, available: true, productId: PRODUCT, priceCents: 5000, intervalMonths: 1, methods: ['CARD', 'PIX'] });
     expect(JSON.stringify(s)).not.toContain('VENDAVENCEU');
-    expect(json(await anon.get('/api/public/plan'))).toMatchObject({ available: true, priceCents: 5000, planName: 'Venceu Mensal' });
+    expect(json(await anon.get('/api/public/plan'))).toMatchObject({ available: true, mode: 'api', priceCents: 5000, planName: 'Venceu Mensal' });
   });
 
   it('cadastro → checkout → webhook → conta criada; a pessoa entra com a senha que escolheu', async () => {
@@ -169,8 +186,45 @@ describe('venda da assinatura do Venceu', () => {
     expect((await new Agent(ctx).post('/api/public/signup', form(email))).statusCode).toBe(409);
 
     expect((await platform.put('/api/platform/sales', { enabled: false, productId: PRODUCT, planName: 'Venceu Mensal', methods: ['CARD'] })).statusCode).toBe(200);
-    expect(json(await anon.get('/api/public/plan')).available).toBe(false);
+    expect(json(await anon.get('/api/public/plan')).mode).not.toBe('api');
     expect((await new Agent(ctx).post('/api/public/signup', form(`venda-${++seq}@example.test`))).statusCode).toBe(409);
+    await configure();
+  });
+
+  it('link fixo: botão abre o link; quem paga por ele ganha conta (webhook ou rotina)', async () => {
+    const LINK = 'https://app.abacatepay.com/pay/bill_Eq2EpR0tp63jEq02XDwUYNMH';
+    // Só o link (venda pela API desligada, sem chave): a página de vendas usa o link.
+    await ctx.owner.query('update platform_settings set abacate_api_key_enc = null, sale_enabled = false where id = 1');
+    expect((await platform.put('/api/platform/sales', { enabled: false, productId: PRODUCT, planName: 'Venceu Mensal', methods: ['CARD'], checkoutUrl: 'https://evil.example/pay/x' })).statusCode).toBe(422);
+    expect((await platform.put('/api/platform/sales', { enabled: false, productId: PRODUCT, planName: 'Venceu Mensal', methods: ['CARD'], checkoutUrl: LINK })).statusCode).toBe(200);
+    const anon = new Agent(ctx);
+    expect(json(await anon.get('/api/public/plan'))).toMatchObject({ available: true, mode: 'link', checkoutUrl: LINK, priceCents: 5000 });
+
+    // Com a chave salva (venda pela API desligada), o link continua e as contas são criadas.
+    expect((await platform.put('/api/platform/sales', { enabled: false, apiKey: KEY, productId: PRODUCT, planName: 'Venceu Mensal', methods: ['CARD'] })).statusCode).toBe(200);
+    expect(json(await anon.get('/api/public/plan')).mode).toBe('link');
+    const s = json(await platform.get('/api/platform/sales'));
+    const email = `link-${++seq}@example.test`;
+    const subId = abacate.payLink('bill_Eq2EpR0tp63jEq02XDwUYNMH', { name: 'Studio Link Pago', email, cellphone: '(21) 98888-1111' });
+    const hook = `/api/webhooks/abacatepay-venceu?webhookSecret=${s.webhookSecret}`;
+    expect((await anon.post(hook, { id: `log_${++seq}`, event: 'subscription.completed', data: { subscription: { id: subId } } })).statusCode).toBe(200);
+    const org = (await ctx.owner.query(
+      `select o.name, o.subscription_status, o.contact_phone, u.role, (select count(*)::int from user_credentials c where c.user_id = u.id) as creds
+         from organizations o join users u on u.organization_id = o.id where u.email = $1`, [email])).rows[0];
+    expect(org).toMatchObject({ name: 'Studio Link Pago', subscription_status: 'ativa', contact_phone: '+5521988881111', role: 'owner', creds: 0 });
+    // Convite enviado por e-mail (definir senha).
+    expect(ctx.mailer.outbox.some((m) => m.to === email && m.text.includes('/convite#token='))).toBe(true);
+
+    // Sem webhook: a rotina encontra a assinatura nova pelo link.
+    const email2 = `link-${++seq}@example.test`;
+    abacate.payLink('bill_Eq2EpR0tp63jEq02XDwUYNMH', { name: 'Clinica Sem Webhook', email: email2 });
+    await ctx.owner.query('update platform_settings set sale_link_checked_at = null where id = 1');
+    await pollSignups(ctx.deps, 10);
+    expect((await ctx.owner.query('select 1 from users where email = $1', [email2])).rowCount).toBe(1);
+    // Rodar de novo não duplica.
+    await ctx.owner.query('update platform_settings set sale_link_checked_at = null where id = 1');
+    await pollSignups(ctx.deps, 10);
+    expect((await ctx.owner.query('select count(*)::int as n from users where email in ($1, $2)', [email, email2])).rows[0].n).toBe(2);
     await configure();
   });
 

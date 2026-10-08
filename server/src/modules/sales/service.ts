@@ -5,7 +5,16 @@ import { OutboundError } from '../../lib/http.js';
 import { decryptSecret } from '../../lib/secrets.js';
 import { withTx } from '../../lib/db.js';
 import { slugify, uniqueSlug } from '../platform/routes.js';
-import { createCustomer, createSubscriptionCheckout, getSubscription, type AbacateSubscription } from '../payments/abacatepay.js';
+import {
+  createCustomer,
+  createSubscriptionCheckout,
+  getCustomer,
+  getSubscription,
+  listSubscriptionsByCheckout,
+  type AbacateSubscription,
+} from '../payments/abacatepay.js';
+import { createInvite } from '../auth/service.js';
+import { deliverInvite } from '../users/routes.js';
 
 export interface SaleConfig {
   apiKey: string | null;
@@ -16,6 +25,9 @@ export interface SaleConfig {
   priceCents: number;
   intervalMonths: number;
   methods: string[];
+  /** Link de checkout fixo criado no painel da AbacatePay (opcional). */
+  checkoutUrl: string | null;
+  linkCheckedAt: Date | null;
 }
 
 export async function loadSaleConfig(deps: Deps): Promise<SaleConfig> {
@@ -31,10 +43,25 @@ export async function loadSaleConfig(deps: Deps): Promise<SaleConfig> {
     priceCents: r?.sale_price_cents ?? 5000,
     intervalMonths: r?.sale_interval_months ?? 1,
     methods: r?.sale_methods ?? ['CARD'],
+    checkoutUrl: r?.sale_checkout_url ?? null,
+    linkCheckedAt: r?.sale_link_checked_at ?? null,
   };
 }
 
 export const saleAvailable = (c: SaleConfig) => c.enabled && !!c.apiKey && !!c.productId;
+
+/**
+ * Como a página de vendas vende: 'api' (cadastro no site + checkout criado pela
+ * API, conta criada na hora), 'link' (botão abre o link fixo da AbacatePay) ou
+ * 'none' (só o formulário de contato).
+ */
+export function saleMode(c: SaleConfig): 'api' | 'link' | 'none' {
+  if (saleAvailable(c)) return 'api';
+  return c.checkoutUrl ? 'link' : 'none';
+}
+
+/** Id do checkout (bill_...) do link fixo. */
+export const linkCheckoutId = (c: SaleConfig) => c.checkoutUrl?.split('/').pop() ?? null;
 
 export interface SignupInput {
   ownerName: string;
@@ -132,6 +159,57 @@ export async function provisionSignup(deps: Deps, signupId: string, sub: Abacate
   });
 }
 
+/**
+ * Assinatura paga pelo link fixo (sem cadastro prévio no site): cria a conta
+ * com os dados do cliente consultados na AbacatePay e envia o convite de
+ * acesso (ou deixa o link de convite disponível no painel da plataforma).
+ */
+export async function provisionFromLink(deps: Deps, apiKey: string, sub: AbacateSubscription) {
+  if (sub.status !== 'ACTIVE' || !sub.customerId) return null;
+  const known = await deps.pools.owner.query(
+    'select 1 from organizations where abacate_subscription_id = $1 union all select 1 from signups where subscription_id = $1',
+    [sub.id],
+  );
+  if (known.rowCount) return null;
+  const cust = await getCustomer(deps, apiKey, sub.customerId);
+  const email = cust.email?.toLowerCase() ?? null;
+  const name = cust.name && cust.name.length >= 2 ? cust.name : email ? email.split('@')[0]!.slice(0, 120) : 'Cliente';
+  const business = name.length >= 2 ? name : 'Nova empresa';
+  const phone = cust.cellphone ? normalizeBrPhone(cust.cellphone) : null;
+  const doc = cust.taxId && /^\d{11}$|^\d{14}$/.test(cust.taxId.replace(/\D/g, '')) ? cust.taxId.replace(/\D/g, '') : null;
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    await deps.pools.owner.query(
+      `insert into signups (owner_name, business_name, email, status, source, subscription_id, abacate_customer_id, checkout_id, error)
+       values ($1, $2, 'sem-email@invalido.local', 'pendente', 'link', $3, $4, null, 'Cliente sem e-mail na AbacatePay: crie a conta manualmente.')
+       on conflict do nothing`,
+      [name.padEnd(2, '-'), business.padEnd(2, '-'), sub.id, sub.customerId],
+    );
+    return null;
+  }
+  const { rows } = await deps.pools.owner.query<{ id: string }>(
+    `insert into signups (owner_name, business_name, email, phone, document, source, abacate_customer_id, subscription_id)
+     values ($1, $2, $3, $4, $5, 'link', $6, $7)
+     on conflict (subscription_id) do nothing returning id`,
+    [name.padEnd(2, '-'), business.padEnd(2, '-'), email, phone, doc, sub.customerId, sub.id],
+  );
+  if (!rows[0]) return null;
+  const orgId = await provisionSignup(deps, rows[0].id, sub);
+  if (orgId) {
+    const u = await deps.pools.owner.query<{ id: string }>(`select id from users where organization_id = $1 and role = 'owner' limit 1`, [orgId]);
+    if (u.rows[0] && deps.config.mailMode !== 'manual') {
+      const token = await withTx(deps.pools.owner, (db) => createInvite(deps, db, u.rows[0]!.id, null));
+      await deliverInvite(deps, email, name, token).catch(() => undefined);
+    }
+  }
+  return orgId;
+}
+
+function normalizeBrPhone(raw: string) {
+  const d = raw.replace(/\D/g, '');
+  const full = d.length === 10 || d.length === 11 ? `55${d}` : d;
+  return /^55\d{10,11}$/.test(full) ? `+${full}` : null;
+}
+
 /** Renovação paga: estende o acesso por um período (limitado a um período a partir de hoje). */
 export async function renewSubscription(deps: Deps, sub: AbacateSubscription) {
   if (sub.status !== 'ACTIVE') return false;
@@ -195,7 +273,8 @@ export async function handleSubscriptionEvent(deps: Deps, apiKey: string, body: 
       `select id from signups where (checkout_id = $1 and $1 is not null) or subscription_id = $2 limit 1`,
       [sub.checkoutId, sub.id],
     );
-    result = s.rows[0] ? await provisionSignup(deps, s.rows[0].id, sub) : null;
+    if (s.rows[0]) result = await provisionSignup(deps, s.rows[0].id, sub);
+    else if (sub.checkoutId && sub.checkoutId === linkCheckoutId(await loadSaleConfig(deps))) result = await provisionFromLink(deps, apiKey, sub);
   } else if (event === 'subscription.renewed') {
     result = await renewSubscription(deps, sub);
   } else if (event === 'subscription.cancelled') {
@@ -237,5 +316,17 @@ export async function pollSignups(deps: Deps, limit = 10) {
   );
   let activated = 0;
   for (const s of rows) if (await checkSignup(deps, cfg.apiKey, s)) activated++;
+  // Link fixo: a cada 5 minutos, procura assinaturas novas pagas por ele.
+  const bill = linkCheckoutId(cfg);
+  if (bill && (!cfg.linkCheckedAt || Date.now() - cfg.linkCheckedAt.getTime() > 5 * 60_000)) {
+    await deps.pools.owner.query('update platform_settings set sale_link_checked_at = now() where id = 1');
+    try {
+      for (const sub of (await listSubscriptionsByCheckout(deps, cfg.apiKey, bill)).slice(0, 20)) {
+        if (await provisionFromLink(deps, cfg.apiKey, sub)) activated++;
+      }
+    } catch {
+      /* falha temporária: tenta na próxima rodada */
+    }
+  }
   return { checked: rows.length, activated };
 }

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import type React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api, ApiError } from '../../api/client';
@@ -26,7 +27,15 @@ const STEPS = [
 ];
 
 export interface PublicPlan {
-  available: boolean; planName: string; priceCents: number; intervalMonths: number; methods: string[];
+  available: boolean; mode: 'api' | 'link' | 'none'; checkoutUrl: string | null; planName: string; priceCents: number; intervalMonths: number; methods: string[];
+}
+
+/** Botão de assinatura: cadastro no site (API) ou link fixo de checkout da AbacatePay. */
+export function SubscribeLink({ plan, className, style, children }: { plan: PublicPlan; className: string; style?: React.CSSProperties; children: React.ReactNode }) {
+  if (plan.mode === 'link' && plan.checkoutUrl) {
+    return <a href={plan.checkoutUrl} className={className} style={style} rel="noopener">{children}</a>;
+  }
+  return <Link to="/assinar" className={className} style={style}>{children}</Link>;
 }
 export const usePublicPlan = () =>
   useQuery({ queryKey: ['public-plan'], queryFn: () => api.get<PublicPlan>('/api/public/plan'), staleTime: 60_000, retry: false });
@@ -79,9 +88,9 @@ export function LandingPage() {
             </p>
             <div className="row">
               {plan?.available ? (
-                <Link to="/assinar" className="btn btn-primary btn-lg">
+                <SubscribeLink plan={plan} className="btn btn-primary btn-lg">
                   Assinar por {price} <Icon name="arrowRight" />
-                </Link>
+                </SubscribeLink>
               ) : (
                 <a href="#comecar" className="btn btn-primary btn-lg">
                   Quero usar o Venceu <Icon name="arrowRight" />
@@ -178,11 +187,11 @@ export function LandingPage() {
               </ul>
               {plan?.available ? (
                 <>
-                  <Link to="/assinar" className="btn btn-primary btn-lg" style={{ width: '100%', justifyContent: 'center' }}>
+                  <SubscribeLink plan={plan} className="btn btn-primary btn-lg" style={{ width: '100%', justifyContent: 'center' }}>
                     Assinar agora <Icon name="arrowRight" />
-                  </Link>
+                  </SubscribeLink>
                   <p className="tiny muted" style={{ margin: '10px 0 0', textAlign: 'center' }}>
-                    Pagamento seguro pela AbacatePay{plan.methods.includes('PIX') ? ' · cartão ou PIX' : ' · cartão de crédito'}. Seu acesso é liberado na hora.
+                    Pagamento seguro pela AbacatePay{plan.mode === 'api' ? (plan.methods.includes('PIX') ? ' · cartão ou PIX' : ' · cartão de crédito') : ''}. {plan.mode === 'api' ? ' Seu acesso é liberado na hora.' : ' Você recebe o acesso logo após o pagamento.'}
                   </p>
                 </>
               ) : (

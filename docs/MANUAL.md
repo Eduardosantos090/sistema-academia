@@ -41,7 +41,13 @@ Em **Plataforma → Venda online**:
    **Ligar venda online**.
 3. Na AbacatePay, em Integração → Webhooks, cadastre a URL e o segredo mostrados na tela, com os eventos de assinatura.
 
-A página de vendas passa a mostrar o preço e o botão **Assinar**. A pessoa preenche os dados da empresa e cria a senha, paga na
+**Só com o link de checkout (sem a chave da API):** em **Link de checkout**, cole o link criado no painel da AbacatePay
+(já configurado: `https://app.abacatepay.com/pay/bill_Eq2EpR0tp63jEq02XDwUYNMH`). O botão **Assinar** abre esse link. Sem a
+chave, crie a conta de quem pagou em **Organizações**. Com a chave salva, a conta de quem paga pelo link é criada sozinha
+(dados do cliente vindos da AbacatePay) e a pessoa recebe o convite para definir a senha — ou o convite fica disponível na
+página da organização, se o e-mail da plataforma não estiver configurado.
+
+Com a venda pela API ligada, a página de vendas mostra o preço e o botão **Assinar**. A pessoa preenche os dados da empresa e cria a senha, paga na
 AbacatePay e a conta é criada automaticamente (com modelos, regras e assistente prontos) — ela já entra com o e-mail e a senha.
 Cada renovação paga estende o acesso por mais um período; se a assinatura for cancelada ou não for paga, o acesso termina no fim
 do período (mais a tolerância) e a conta é suspensa. A lista de cadastros aparece na mesma tela.

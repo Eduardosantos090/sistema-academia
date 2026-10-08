@@ -10,7 +10,7 @@ interface Signup {
   status: 'pendente' | 'ativo' | 'cancelado' | 'expirado'; error: string | null; createdAt: string; activatedAt: string | null; organizationId: string | null;
 }
 interface Sales {
-  enabled: boolean; available: boolean; keyHint: string | null; productId: string | null; planName: string; priceCents: number;
+  enabled: boolean; available: boolean; mode: 'api' | 'link' | 'none'; checkoutUrl: string | null; keyHint: string | null; productId: string | null; planName: string; priceCents: number;
   intervalMonths: number; methods: ('CARD' | 'PIX')[]; webhookUrl: string; webhookSecret: string | null; signups: Signup[];
 }
 
@@ -28,10 +28,10 @@ export function SalesPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['platform-sales'], queryFn: () => api.get<Sales>('/api/platform/sales') });
-  const [f, setF] = useState({ apiKey: '', productId: '', planName: '', card: true, pix: false });
+  const [f, setF] = useState({ apiKey: '', productId: '', planName: '', card: true, pix: false, checkoutUrl: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
   useEffect(() => {
-    if (q.data) setF((x) => ({ ...x, productId: q.data.productId ?? '', planName: q.data.planName, card: q.data.methods.includes('CARD'), pix: q.data.methods.includes('PIX') }));
+    if (q.data) setF((x) => ({ ...x, checkoutUrl: q.data.checkoutUrl ?? '', productId: q.data.productId ?? '', planName: q.data.planName, card: q.data.methods.includes('CARD'), pix: q.data.methods.includes('PIX') }));
   }, [q.data]);
   const save = useMutation({
     mutationFn: (v: { enabled: boolean; regenerateWebhookSecret?: boolean }) =>
@@ -41,6 +41,7 @@ export function SalesPage() {
         productId: f.productId,
         planName: f.planName,
         methods: [...(f.card ? ['CARD'] : []), ...(f.pix ? ['PIX'] : [])],
+        checkoutUrl: f.checkoutUrl.trim() || null,
         ...(v.regenerateWebhookSecret ? { regenerateWebhookSecret: true } : {}),
       }),
     onSuccess: (r, v) => {
@@ -61,14 +62,23 @@ export function SalesPage() {
     <div className="stack">
       <PageHeader title="Venda online" subtitle="Assinatura do Venceu vendida pela página de vendas, com cobrança recorrente pela AbacatePay." />
       <div className="grid grid-3">
-        <div className="card stat"><div className="label">Situação</div><div className="value">{s.available ? 'Vendendo' : 'Desligada'}</div></div>
+        <div className="card stat"><div className="label">Situação</div><div className="value">{s.mode === 'api' ? 'Vendendo' : s.mode === 'link' ? 'Pelo link' : 'Desligada'}</div></div>
         <div className="card stat"><div className="label">Preço</div><div className="value">{fmtCents(s.priceCents)}<span className="meta">/{interval(s.intervalMonths)}</span></div></div>
         <div className="card stat"><div className="label">Contas criadas pelo site</div><div className="value">{s.signups.filter((x) => x.status === 'ativo').length}</div></div>
       </div>
 
       <section className="card card-body stack" style={{ maxWidth: 820 }}>
         <h2>Configuração</h2>
-        {!s.available && <Alert kind="info">Com a venda desligada, a página de vendas mostra só o formulário "Quero usar o Venceu".</Alert>}
+        {s.mode === 'link' && (
+          <Alert kind="info">
+            O botão "Assinar" da página de vendas abre o link de checkout. Com a chave da API salva, quem paga por ele também tem a conta
+            criada automaticamente; sem a chave, crie a conta em Organizações quando o pagamento aparecer na AbacatePay.
+          </Alert>
+        )}
+        {s.mode === 'none' && <Alert kind="info">Venda desligada: a página de vendas mostra só o formulário "Quero usar o Venceu".</Alert>}
+        <TextField label="Link de checkout da AbacatePay (opcional)" value={f.checkoutUrl} onChange={(e) => setF({ ...f, checkoutUrl: e.target.value })}
+          error={errors.checkoutUrl} placeholder="https://app.abacatepay.com/pay/bill_…"
+          hint="Link fixo criado no painel da AbacatePay. Usado quando a venda pela API está desligada." />
         <TextField label={s.keyHint ? `Chave da API v2 da AbacatePay (atual: ${s.keyHint})` : 'Chave da API v2 da AbacatePay'} type="password" autoComplete="off"
           value={f.apiKey} onChange={(e) => setF({ ...f, apiKey: e.target.value })} error={errors.apiKey}
           placeholder={s.keyHint ? 'Em branco mantém a chave atual' : 'abc_…'}
@@ -84,9 +94,9 @@ export function SalesPage() {
             hint="Só se o PIX Automático estiver habilitado na sua conta AbacatePay." />
         </div>
         <div className="form-actions">
-          {s.enabled && <Button variant="ghost" loading={save.isPending} onClick={() => save.mutate({ enabled: false })}>Desligar venda</Button>}
+          <Button variant="ghost" loading={save.isPending} onClick={() => save.mutate({ enabled: false })}>{s.enabled ? 'Desligar venda pela API' : 'Salvar sem a API'}</Button>
           <Button variant="primary" loading={save.isPending} disabled={!f.productId || (!f.apiKey && !s.keyHint)} onClick={() => save.mutate({ enabled: true })}>
-            {s.enabled ? 'Salvar' : 'Ligar venda online'}
+            {s.enabled ? 'Salvar' : 'Ligar venda pela API'}
           </Button>
         </div>
       </section>

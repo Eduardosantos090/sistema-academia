@@ -10,7 +10,7 @@ import { OutboundError } from '../../lib/http.js';
 import { zEmail, zOptionalDocument, zOptionalPhone, zPassword, zText } from '../../lib/normalize.js';
 import { SEGMENTS } from '../platform/routes.js';
 import { getProduct, getStore, signatureOk, zAbacateKeyRe } from '../payments/abacatepay.js';
-import { checkSignup, handleSubscriptionEvent, loadSaleConfig, saleAvailable, startSignup } from './service.js';
+import { checkSignup, handleSubscriptionEvent, loadSaleConfig, saleAvailable, saleMode, startSignup } from './service.js';
 
 const CYCLE_MONTHS: Record<string, number> = { MONTHLY: 1, QUARTERLY: 3, SEMIANNUALLY: 6, ANNUALLY: 12, YEARLY: 12 };
 const zToken = z.object({ token: z.string().regex(/^[0-9a-f]{64}$/) });
@@ -26,7 +26,16 @@ export function registerSalesRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/public/plan', { config: { public: true } }, async (_req, reply) => {
     const c = await loadSaleConfig(deps);
     reply.header('cache-control', 'public, max-age=60');
-    return { available: saleAvailable(c), planName: c.planName, priceCents: c.priceCents, intervalMonths: c.intervalMonths, methods: c.methods };
+    const mode = saleMode(c);
+    return {
+      available: mode !== 'none',
+      mode,
+      checkoutUrl: mode === 'link' ? c.checkoutUrl : null,
+      planName: c.planName,
+      priceCents: c.priceCents,
+      intervalMonths: c.intervalMonths,
+      methods: c.methods,
+    };
   });
 
   /** Cadastro + checkout de assinatura: devolve a URL de pagamento da AbacatePay. */
@@ -113,6 +122,8 @@ export function registerSalesRoutes(app: FastifyInstance, deps: Deps) {
     return {
       enabled: c.enabled,
       available: saleAvailable(c),
+      mode: saleMode(c),
+      checkoutUrl: c.checkoutUrl,
       keyHint: c.apiKey ? `${c.apiKey.slice(0, 8)}…${c.apiKey.slice(-4)}` : null,
       productId: c.productId,
       planName: c.planName,
@@ -135,6 +146,12 @@ export function registerSalesRoutes(app: FastifyInstance, deps: Deps) {
           productId: z.string().trim().regex(/^[A-Za-z0-9_-]{1,200}$/, 'ID do produto inválido.'),
           planName: zText(2, 80),
           methods: z.array(z.enum(['CARD', 'PIX'])).min(1, 'Escolha ao menos uma forma de pagamento.').max(2),
+          checkoutUrl: z
+            .string()
+            .trim()
+            .regex(/^https:\/\/app\.abacatepay\.com\/pay\/[A-Za-z0-9_-]{1,200}$/, 'Use um link no formato https://app.abacatepay.com/pay/bill_…')
+            .nullable()
+            .optional(),
           regenerateWebhookSecret: z.boolean().optional(),
         })
         .strict(),
@@ -143,7 +160,7 @@ export function registerSalesRoutes(app: FastifyInstance, deps: Deps) {
     await deps.limiters.sendNow.consume(`u:${me.id}`);
     const current = await loadSaleConfig(deps);
     const apiKey = body.apiKey || current.apiKey;
-    if (body.enabled && !apiKey) throw new AppError(422, 'invalid', 'Informe a chave da API da AbacatePay.');
+    if (body.enabled && !apiKey) throw new AppError(422, 'invalid', 'Informe a chave da API da AbacatePay (ou use só o link de checkout, com a venda pela API desligada).');
     let priceCents = current.priceCents;
     let intervalMonths = current.intervalMonths;
     let productName: string | null = null;
@@ -167,10 +184,11 @@ export function registerSalesRoutes(app: FastifyInstance, deps: Deps) {
     const secret = !current.webhookSecret || body.regenerateWebhookSecret ? newToken() : current.webhookSecret;
     await deps.pools.owner.query(
       `update platform_settings set abacate_api_key_enc = $1, abacate_webhook_secret_enc = $2, sale_enabled = $3, sale_product_id = $4,
-              sale_plan_name = $5, sale_price_cents = $6, sale_interval_months = $7, sale_methods = $8, updated_at = now()
+              sale_plan_name = $5, sale_price_cents = $6, sale_interval_months = $7, sale_methods = $8,
+              sale_checkout_url = case when $9::boolean then $10 else sale_checkout_url end, updated_at = now()
         where id = 1`,
       [apiKey ? encryptSecret(key, apiKey) : null, encryptSecret(key, secret), body.enabled && !!apiKey, body.productId, body.planName,
-        priceCents, intervalMonths, body.methods],
+        priceCents, intervalMonths, body.methods, body.checkoutUrl !== undefined, body.checkoutUrl ?? null],
     );
     await deps.pools.owner.query(
       `insert into audit_events (actor_id, action, entity_type, details, ip) values ($1, 'platform.sales_settings', 'platform', $2, $3)`,
