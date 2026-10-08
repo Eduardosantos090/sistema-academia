@@ -81,7 +81,8 @@ export function SignupPage() {
         <TextField label="Repita a senha" type="password" value={form.password2} onChange={set('password2')} error={errors.password2} required autoComplete="new-password" />
         <input type="text" name="website" value={form.website} onChange={set('website')} tabIndex={-1} autoComplete="off" aria-hidden="true" style={{ position: 'absolute', left: -9999, width: 1, height: 1 }} />
         <Checkbox checked={consent} onChange={(e) => setConsent(e.target.checked)}
-          label="Concordo com a cobrança recorrente e com o uso dos meus dados para criar e manter a minha conta (LGPD)." />
+          label={<>Li e aceito os <Link to="/termos" target="_blank">Termos de Uso</Link> (assinatura com renovação automática) e a{' '}
+            <Link to="/privacidade" target="_blank">Política de Privacidade</Link>.</>} />
         {errors.consent && <span className="small red" role="alert">{errors.consent}</span>}
         <Button type="submit" variant="primary" loading={busy}>Ir para o pagamento <Icon name="arrowRight" /></Button>
         <p className="tiny muted" style={{ margin: 0, textAlign: 'center' }}>

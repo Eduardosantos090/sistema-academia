@@ -125,7 +125,7 @@ export function Switch({ label, hint, ...rest }: { label: ReactNode; hint?: stri
   );
 }
 
-export function Checkbox({ label, hint, ...rest }: { label: string; hint?: string } & InputHTMLAttributes<HTMLInputElement>) {
+export function Checkbox({ label, hint, ...rest }: { label: ReactNode; hint?: string } & InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="checkbox">
       <input type="checkbox" {...rest} />

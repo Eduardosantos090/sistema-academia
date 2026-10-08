@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../auth/AuthContext';
 import { api } from '../api/client';
@@ -9,7 +9,15 @@ import { Icon, type IconName } from '../components/icons';
 import { brand } from '../brand';
 
 export function Footer({ className = 'footer' }: { className?: string }) {
-  return <footer className={className}>{brand.credit}</footer>;
+  return (
+    <footer className={className}>
+      <span className="footer-links">
+        <span>{brand.credit}</span>
+        <Link to="/termos">Termos de uso</Link>
+        <Link to="/privacidade">Privacidade</Link>
+      </span>
+    </footer>
+  );
 }
 
 /** Logotipo oficial (arquivos de imagem — nunca recriado com fonte parecida). */

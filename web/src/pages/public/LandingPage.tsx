@@ -223,7 +223,11 @@ export function LandingPage() {
 
       <footer className="l-footer">
         <span>© {new Date().getFullYear()} Venceu · {brand.tagline}</span>
-        <span>{brand.credit}</span>
+        <span className="footer-links">
+          <Link to="/termos">Termos de uso</Link>
+          <Link to="/privacidade">Privacidade</Link>
+          <span>{brand.credit}</span>
+        </span>
       </footer>
     </div>
   );
@@ -285,7 +289,7 @@ function AccessRequestForm() {
       <Checkbox
         checked={consent}
         onChange={(e) => setConsent(e.target.checked)}
-        label="Concordo com o uso destes dados apenas para contato sobre o Venceu."
+        label={<>Concordo com o uso destes dados apenas para contato sobre o Venceu (<Link to="/privacidade" target="_blank">Política de Privacidade</Link>).</>}
       />
       {errors.consent && <span className="error small red">{errors.consent}</span>}
       <Button type="submit" variant="primary" size="lg" loading={busy} disabled={!consent}>
