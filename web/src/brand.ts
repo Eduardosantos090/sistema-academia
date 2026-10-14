@@ -13,7 +13,7 @@ export const brand = {
   /** Dados exibidos nos Termos de Uso e na Política de Privacidade. */
   legal: {
     responsible: 'Eduardo Sobral',
-    contactEmail: 'santooos1034@icloud.com',
+    contactEmail: 'venceuapp@gmail.com',
     updatedAt: '8 de outubro de 2026',
   },
 } as const;
