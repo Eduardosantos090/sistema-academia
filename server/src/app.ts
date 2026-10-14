@@ -27,6 +27,7 @@ import { registerMediaRoutes } from './modules/media/routes.js';
 import { registerReminderRoutes } from './modules/reminders/routes.js';
 import { registerPaymentRoutes } from './modules/payments/routes.js';
 import { registerSalesRoutes } from './modules/sales/routes.js';
+import { registerQrCodeRoutes } from './modules/channels/qrcode.routes.js';
 
 z.config(z.locales.pt());
 
@@ -193,6 +194,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   registerReminderRoutes(app, deps);
   registerPaymentRoutes(app, deps);
   registerSalesRoutes(app, deps);
+  registerQrCodeRoutes(app, deps);
 
   /** Saúde da API e do banco. Em falha, informa só a CATEGORIA (sem hosts ou credenciais). */
   app.get('/api/health', { config: { public: true } }, async (_req, reply) => {

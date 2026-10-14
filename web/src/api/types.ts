@@ -21,7 +21,7 @@ export type ChargeStatus = 'aberta' | 'paga' | 'cancelada';
 export type MessageStatus = 'pendente' | 'manual' | 'enviada' | 'falhou' | 'cancelada';
 export type Channel = 'whatsapp' | 'email';
 export type TemplateKind = 'lembrete' | 'vencimento' | 'atraso' | 'pagamento_confirmado' | 'personalizada';
-export type WhatsAppMode = 'manual' | 'cloud_api' | 'webhook';
+export type WhatsAppMode = 'manual' | 'cloud_api' | 'webhook' | 'qrcode';
 
 export interface Customer {
   id: string;

@@ -8,7 +8,7 @@ export interface HttpResult {
 }
 
 export interface HttpRequest {
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'DELETE';
   headers?: Record<string, string>;
   body?: string;
 }

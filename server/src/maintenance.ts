@@ -17,6 +17,7 @@ export async function runMaintenance(deps: Deps, budgetMs = 20_000) {
      delete from password_resets where expires_at < now() - interval '7 days';
      delete from invites where expires_at < now() - interval '30 days' and used_at is null;
      delete from rate_limit_counters where expires_at < now() - interval '1 hour';
+     delete from client_errors where created_at < now() - interval '30 days';
      update messages set status = 'cancelada', error = 'Envio manual não realizado em 7 dias.'
       where status = 'manual' and created_at < now() - interval '7 days';`,
   );

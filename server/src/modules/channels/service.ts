@@ -5,8 +5,9 @@ import { decryptSecret, hmacHex } from '../../lib/secrets.js';
 import { OutboundError } from '../../lib/http.js';
 import { mediaKind } from '../../lib/media.js';
 import type { Mailer, OrgSmtp } from '../../lib/mailer.js';
+import { evoSend, loadEvolutionServer, type EvoState, type EvolutionServer } from './evolution.js';
 
-export type WhatsAppMode = 'manual' | 'cloud_api' | 'webhook';
+export type WhatsAppMode = 'manual' | 'cloud_api' | 'webhook' | 'qrcode';
 
 export interface ChannelConfig {
   mode: WhatsAppMode;
@@ -18,6 +19,9 @@ export interface ChannelConfig {
   webhookSecret: string | null;
   emailEnabled: boolean;
   emailReplyTo: string | null;
+  /** WhatsApp por QR Code (Evolution API): instância da organização no servidor da plataforma. */
+  evo: { server: EvolutionServer | null; name: string; token: string; status: EvoState; number: string | null } | null;
+  evoWebhookSecret: string | null;
   /** Conta de e-mail própria (null = remetente da plataforma). */
   smtp: Omit<OrgSmtp, 'fromName'> & { fromName: string | null } | null;
 }
@@ -39,6 +43,11 @@ interface ChannelRow {
   smtp_user: string | null;
   smtp_password_enc: string | null;
   smtp_from_name: string | null;
+  evo_instance: string | null;
+  evo_token_enc: string | null;
+  evo_webhook_secret_enc: string | null;
+  evo_status: EvoState | null;
+  evo_number: string | null;
 }
 
 /** Lê (e decifra) a configuração de canais. Somente pelo servidor privilegiado. */
@@ -57,7 +66,15 @@ export async function loadChannels(deps: Deps, orgId: string, db: Db | pg.Pool =
     emailEnabled: r?.email_enabled ?? true,
     emailReplyTo: r?.email_reply_to ?? null,
     smtp: smtpFromRow(key, r),
+    evo: await evoFromRow(deps, key, r),
+    evoWebhookSecret: decryptSecret(key, r?.evo_webhook_secret_enc),
   };
+}
+
+async function evoFromRow(deps: Deps, key: Buffer, r: ChannelRow | undefined): Promise<ChannelConfig['evo']> {
+  const token = decryptSecret(key, r?.evo_token_enc);
+  if (!r?.evo_instance || !token) return null;
+  return { server: await loadEvolutionServer(deps), name: r.evo_instance, token, status: r.evo_status ?? 'close', number: r.evo_number };
 }
 
 function smtpFromRow(key: Buffer, r: ChannelRow | undefined): ChannelConfig['smtp'] {
@@ -76,6 +93,7 @@ export function orgMailer(deps: Deps, c: ChannelConfig, orgName: string): Mailer
 export function whatsappAutomatic(c: ChannelConfig): boolean {
   if (c.mode === 'cloud_api') return !!c.phoneNumberId && !!c.accessToken;
   if (c.mode === 'webhook') return !!c.webhookUrl && !!c.webhookSecret;
+  if (c.mode === 'qrcode') return !!c.evo?.server && c.evo.status === 'open';
   return false;
 }
 
@@ -177,6 +195,17 @@ export async function sendWhatsApp(
     }
     return { providerId };
   }
+  if (c.mode === 'qrcode') {
+    if (!c.evo?.server) throw new OutboundError('WhatsApp por QR Code não configurado.');
+    if (c.evo.status !== 'open') throw new OutboundError('WhatsApp desconectado: leia o QR Code de novo em Configurações → WhatsApp.');
+    const kind = msg.media ? mediaKind(msg.media.mime) : null;
+    const providerId = await evoSend(deps, c.evo.server, c.evo, {
+      number: digits,
+      text: msg.body,
+      media: msg.media && kind ? { ...msg.media, kind } : null,
+    });
+    return { providerId };
+  }
   throw new OutboundError('Envio automático de WhatsApp não configurado (modo manual).');
 }
 
@@ -197,7 +226,7 @@ export async function sendWhatsAppWithMedia(
   c: ChannelConfig,
   msg: { to: string; body: string; template?: WaTemplate | null; messageId?: string; media?: OutMedia | null },
 ) {
-  if (!msg.media || c.mode !== 'cloud_api') return sendWhatsApp(deps, org, c, msg);
+  if (!msg.media || (c.mode !== 'cloud_api' && c.mode !== 'qrcode')) return sendWhatsApp(deps, org, c, msg);
   const kind = mediaKind(msg.media.mime);
   if (!msg.template && kind !== 'audio' && msg.body.length <= 1024) return sendWhatsApp(deps, org, c, msg);
   const first = msg.body || msg.template ? await sendWhatsApp(deps, org, c, { ...msg, media: null }) : null;

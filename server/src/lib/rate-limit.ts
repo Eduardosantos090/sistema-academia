@@ -83,6 +83,7 @@ export interface Limiters {
   publicIp: RateLimiter;
   mediaIp: RateLimiter;
   payIp: RateLimiter;
+  clientErrorIp: RateLimiter;
 }
 
 export function createLimiters(store: 'memory' | 'postgres' = 'memory', pool?: pg.Pool): Limiters {
@@ -106,5 +107,7 @@ export function createLimiters(store: 'memory' | 'postgres' = 'memory', pool?: p
     mediaIp: make('mediaIp', 600, 10 * min),
     // Página pública de pagamento (abrir e conferir o PIX).
     payIp: make('payIp', 120, 10 * min),
+    // Relatos de erro de tela vindos do navegador.
+    clientErrorIp: make('clientErrorIp', 20, 10 * min),
   };
 }

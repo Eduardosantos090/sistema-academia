@@ -6,6 +6,7 @@ import { ApiError } from './api/client';
 import { AuthProvider } from './auth/AuthContext';
 import { ToastProvider } from './components/ui';
 import { App } from './App';
+import { ErrorBoundary, installGlobalErrorReporting } from './components/ErrorBoundary';
 import '@fontsource-variable/inter';
 import '@fontsource-variable/montserrat';
 import './styles.css';
@@ -20,8 +21,11 @@ const queryClient = new QueryClient({
   },
 });
 
+installGlobalErrorReporting();
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+    <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <ToastProvider>
@@ -31,5 +35,6 @@ createRoot(document.getElementById('root')!).render(
         </ToastProvider>
       </BrowserRouter>
     </QueryClientProvider>
+    </ErrorBoundary>
   </StrictMode>,
 );

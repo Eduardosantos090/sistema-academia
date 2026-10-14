@@ -246,7 +246,13 @@ export function Modal({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  // onClose costuma ser uma função nova a cada render: guardada em ref para o efeito
+  // abaixo rodar só ao abrir (senão o foco "pula" para o primeiro campo a cada tecla).
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     const prev = document.activeElement as HTMLElement | null;
     const el = ref.current;
     const focusables = () =>
@@ -255,7 +261,7 @@ export function Modal({
       ).filter((x) => !x.hasAttribute('disabled'));
     (focusables().find((x) => x.tagName !== 'BUTTON') ?? focusables()[0])?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') closeRef.current();
       if (e.key === 'Tab') {
         const f = focusables();
         if (!f.length) return;
@@ -273,9 +279,10 @@ export function Modal({
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
       prev?.focus();
     };
-  }, [onClose]);
+  }, []);
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`modal ${size === 'lg' ? 'modal-lg' : ''}`} role="dialog" aria-modal="true" aria-labelledby={titleId} ref={ref}>

@@ -11,6 +11,7 @@ import { cleanText, zOptionalDocument, zOptionalEmail, zOptionalPhone, zOptional
 import { TEMPLATE_VARS, chargeValues, renderTemplate, unknownVariables } from '../../lib/template.js';
 import { SEGMENTS } from '../platform/routes.js';
 import { emailAvailable, loadChannels, orgMailer, sendWhatsApp, whatsappAutomatic } from '../channels/service.js';
+import { loadEvolutionServer } from '../channels/evolution.js';
 
 const zTemplateBody = (max: number) =>
   zText(5, max).superRefine((v, ctx) => {
@@ -61,6 +62,7 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
         emailAvailable: emailAvailable(deps, c),
         emailReplyTo: c.emailReplyTo,
         smtp: c.smtp ? { host: c.smtp.host, port: c.smtp.port, user: c.smtp.user, fromName: c.smtp.fromName } : null,
+        qrcode: { available: !!(await loadEvolutionServer(deps)), connected: !!c.evo, state: c.evo?.status ?? null, number: c.evo?.number ?? null },
         platformMailMode: deps.config.mailMode,
         // Endereços e token de verificação: somente para o responsável (configuração das integrações).
         ...(isOwner

@@ -1,3 +1,4 @@
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -129,6 +130,7 @@ export function AppLayout() {
               <div className="nav-section">Plataforma Venceu</div>
               <Item to="/app/plataforma" end icon="building" label="Organizações" />
               <Item to="/app/plataforma/vendas" icon="dollar" label="Venda online" />
+              <Item to="/app/plataforma/whatsapp" icon="phone" label="WhatsApp (QR Code)" />
               <Item to="/app/plataforma/pedidos" icon="inbox" label="Pedidos de acesso" />
               <Item to="/app/plataforma/auditoria" icon="shield" label="Auditoria geral" />
             </>
@@ -160,7 +162,7 @@ export function AppLayout() {
         </header>
         <main id="conteudo" className="content" tabIndex={-1}>
           {c && <PlanBanner c={c} />}
-          <Outlet />
+          <ErrorBoundary resetKey={loc.pathname}><Outlet /></ErrorBoundary>
         </main>
         <Footer />
       </div>

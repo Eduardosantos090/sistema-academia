@@ -1,3 +1,16 @@
+# WhatsApp por QR Code (recomendado)
+
+1. A administração do Venceu instala a **Evolution API v2** (servidor próprio/VPS ou hospedagem contratada, com `https://`) e
+   informa o endereço e a chave global (`AUTHENTICATION_API_KEY`) em **Plataforma → WhatsApp (QR Code)**. O sistema testa a
+   conexão antes de salvar.
+2. Cada empresa, em **Configurações → WhatsApp**, clica em **Conectar com QR Code** e lê o código no celular
+   (WhatsApp → Aparelhos conectados → Conectar um aparelho). Funciona com WhatsApp comum ou Business, sem cadastro na Meta.
+3. Conectado, os lembretes saem pelo número da empresa e as mensagens recebidas vão para o assistente e o Atendimento.
+   Se o celular desconectar, os lembretes voltam a ficar prontos para envio manual até a nova leitura do QR Code.
+
+O Venceu cria uma instância por empresa, já com o webhook de entrada configurado (autenticado por um segredo em cabeçalho).
+Mensagens de grupos e as enviadas pelo próprio número são ignoradas.
+
 # Integração com o WhatsApp
 
 Cada organização escolhe em **Configurações → WhatsApp**:

@@ -8,6 +8,35 @@ import { verifySigned } from '../../lib/secrets.js';
 import { SEGMENTS } from '../platform/routes.js';
 
 export function registerPublicRoutes(app: FastifyInstance, deps: Deps) {
+  /** Erro de tela no navegador (sem dados de formulário; só mensagem, pilha e página). */
+  app.post('/api/client-errors', { config: { public: true } }, async (req, reply) => {
+    const body = parse(
+      z
+        .object({
+          message: z.string().max(2000),
+          stack: z.string().max(20000).optional(),
+          path: z.string().max(2000).optional(),
+          release: z.string().max(200).optional(),
+        })
+        .strict(),
+      req.body,
+    );
+    await deps.limiters.clientErrorIp.consume(`ip:${req.ip}`);
+    const clean = (v: string | undefined, max: number) => (v ? v.replace(/[\u0000-\u0008\u000b-\u001f]/g, ' ').slice(0, max) : null);
+    await deps.pools.owner.query(
+      `insert into client_errors (user_id, path, message, stack, user_agent, release) values ($1, $2, $3, $4, $5, $6)`,
+      [
+        req.authUser?.id ?? null,
+        clean(body.path?.split(/[?#]/)[0], 300),
+        clean(body.message, 500) ?? 'erro',
+        clean(body.stack, 4000),
+        clean(String(req.headers['user-agent'] ?? ''), 300),
+        clean(body.release, 60),
+      ],
+    );
+    return reply.code(204).send();
+  });
+
   /** Pedido de acesso pelo site ("Quero usar o Venceu"). */
   app.post('/api/public/access-request', { config: { public: true } }, async (req) => {
     const body = parse(

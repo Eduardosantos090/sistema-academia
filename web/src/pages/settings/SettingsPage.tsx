@@ -20,6 +20,7 @@ interface Settings {
     whatsappMode: WhatsAppMode; whatsappAutomatic: boolean; phoneNumberId: string | null; hasAccessToken: boolean; hasAppSecret: boolean;
     webhookUrl: string | null; hasWebhookSecret: boolean; emailEnabled: boolean; emailAvailable: boolean; emailReplyTo: string | null;
     smtp: { host: string; port: number; user: string; fromName: string | null } | null;
+    qrcode: { available: boolean; connected: boolean; state: 'open' | 'connecting' | 'close' | null; number: string | null };
     platformMailMode: 'smtp' | 'manual' | 'dev'; verifyToken?: string | null; cloudWebhookUrl?: string; inboundWebhookUrl?: string;
   };
 }
@@ -172,6 +173,105 @@ function BillingTab({ s, canEdit }: { s: Settings; canEdit: boolean }) {
   );
 }
 
+/** Conexão do WhatsApp da empresa lendo um QR Code (como no WhatsApp Web). */
+function QrCodeCard({ s }: { s: Settings }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = s.channels.qrcode;
+  const [qr, setQr] = useState<string | null>(null);
+  const [showing, setShowing] = useState(false);
+  const [confirmOff, setConfirmOff] = useState(false);
+  const connected = q.connected && q.state === 'open';
+  const connect = useMutation({
+    mutationFn: () => api.post<{ state: string; qr: string | null }>('/api/settings/whatsapp/qrcode/connect'),
+    onSuccess: (r) => {
+      if (r.state === 'open') {
+        setShowing(false);
+        void qc.invalidateQueries({ queryKey: ['settings'] });
+        toast.success('WhatsApp conectado!');
+        return;
+      }
+      setQr(r.qr);
+      setShowing(true);
+    },
+    onError: (e) => toast.error(e),
+  });
+  const off = useMutation({
+    mutationFn: () => api.post('/api/settings/whatsapp/qrcode/disconnect'),
+    onSuccess: () => {
+      setConfirmOff(false);
+      void qc.invalidateQueries({ queryKey: ['settings'] });
+      toast.success('WhatsApp desconectado.');
+    },
+    onError: (e) => toast.error(e),
+  });
+  // Enquanto o QR Code está na tela: confere a conexão a cada 3 s e troca o código a cada 30 s.
+  useEffect(() => {
+    if (!showing) return;
+    let ticks = 0;
+    const id = setInterval(() => {
+      ticks++;
+      void api.get<{ state: string }>('/api/settings/whatsapp/qrcode/status').then((r) => {
+        if (r.state === 'open') {
+          setShowing(false);
+          void qc.invalidateQueries({ queryKey: ['settings'] });
+          toast.success('WhatsApp conectado! Os lembretes já saem pelo seu número.');
+        }
+      }).catch(() => undefined);
+      if (ticks % 10 === 0) connect.mutate();
+      if (ticks > 100) setShowing(false);
+    }, 3000);
+    return () => clearInterval(id);
+  }, [showing]);
+
+  return (
+    <section className="card card-body stack qr-card">
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <h2 style={{ margin: 0 }}>WhatsApp por QR Code <span className="badge badge-success" style={{ marginLeft: 6 }}>Recomendado</span></h2>
+        {q.connected && (
+          <span className={`badge ${connected ? 'badge-success' : 'badge-warning'}`}>{connected ? 'Conectado' : q.state === 'connecting' ? 'Conectando…' : 'Desconectado'}</span>
+        )}
+      </div>
+      {connected ? (
+        <>
+          <p style={{ margin: 0 }}>
+            Seu WhatsApp {q.number ? <strong>{fmtPhone(q.number)}</strong> : ''} está conectado. Os lembretes saem pelo seu número e o assistente responde
+            as mensagens recebidas.
+          </p>
+          <p className="muted small" style={{ margin: 0 }}>Mantenha o celular com internet. Para trocar de número, desconecte e leia o QR Code com o outro aparelho.</p>
+          <div className="form-actions"><Button variant="ghost" onClick={() => setConfirmOff(true)}>Desconectar</Button></div>
+        </>
+      ) : (
+        <>
+          <p style={{ margin: 0 }}>Use o WhatsApp da sua empresa (comum ou Business), sem cadastro na Meta: é só ler um QR Code, como no WhatsApp Web.</p>
+          <ol className="muted small" style={{ margin: 0, paddingLeft: 20 }}>
+            <li>Clique em <strong>Conectar com QR Code</strong>.</li>
+            <li>No celular, abra o WhatsApp → <strong>Aparelhos conectados</strong> → <strong>Conectar um aparelho</strong>.</li>
+            <li>Aponte a câmera para o código que aparece na tela.</li>
+          </ol>
+          <div className="form-actions">
+            {q.connected && <Button variant="ghost" onClick={() => setConfirmOff(true)}>Remover conexão</Button>}
+            <Button variant="primary" loading={connect.isPending && !showing} onClick={() => connect.mutate()}><WhatsAppIcon size={18} /> Conectar com QR Code</Button>
+          </div>
+        </>
+      )}
+      {showing && (
+        <Modal title="Leia o QR Code no seu celular" onClose={() => setShowing(false)}>
+          <div className="stack" style={{ alignItems: 'center', textAlign: 'center' }}>
+            {qr ? <img className="qr-img" src={qr} alt="QR Code para conectar o WhatsApp" width={264} height={264} /> : <Loading label="Gerando o QR Code…" />}
+            <p className="small" style={{ margin: 0 }}>WhatsApp → <strong>Aparelhos conectados</strong> → <strong>Conectar um aparelho</strong></p>
+            <p className="tiny muted" style={{ margin: 0 }}>O código se renova sozinho. Esta janela fecha quando a conexão for concluída.</p>
+          </div>
+        </Modal>
+      )}
+      {confirmOff && (
+        <ConfirmDialog title="Desconectar WhatsApp" message="Os lembretes voltam a ficar prontos para envio manual até você conectar de novo." confirmLabel="Desconectar"
+          danger loading={off.isPending} onCancel={() => setConfirmOff(false)} onConfirm={() => off.mutate()} />
+      )}
+    </section>
+  );
+}
+
 function WhatsAppTab({ s }: { s: Settings }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -222,6 +322,9 @@ function WhatsAppTab({ s }: { s: Settings }) {
         <span className={`badge ${c.whatsappAutomatic ? 'badge-success' : 'badge-warning'}`}>{c.whatsappAutomatic ? 'Automático' : 'Manual'}</span>
       </div>
 
+      {c.qrcode.available && <QrCodeCard s={s} />}
+
+      {c.qrcode.available && <h2 style={{ margin: '8px 0 0' }}>Outras formas de conectar</h2>}
       <div className="radio-cards">
         {([
           ['manual', 'Manual (sem custo)', 'Você envia pelo seu WhatsApp com um clique. Sem assistente automático.'],

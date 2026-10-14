@@ -361,3 +361,16 @@ describe('e-mail próprio da organização', () => {
     }
   });
 });
+
+describe('relato de erro de tela', () => {
+  it('guarda o erro do navegador sem exigir login, com limites', async () => {
+    const { Agent } = await import('./helpers.js');
+    const anon = new Agent(ctx);
+    const r = await anon.post('/api/client-errors', { message: 'TypeError: x is undefined', stack: 'at y\n'.repeat(3000), path: '/app/clientes?token=segredo#t=1' });
+    expect(r.statusCode).toBe(204);
+    const { rows } = await ctx.owner.query(`select path, message, length(stack) as len from client_errors order by id desc limit 1`);
+    expect(rows[0]).toMatchObject({ path: '/app/clientes', message: 'TypeError: x is undefined' });
+    expect(rows[0].len).toBeLessThanOrEqual(4000);
+    expect((await anon.post('/api/client-errors', { message: 'x', extra: 1 })).statusCode).toBe(422);
+  });
+});
