@@ -29,7 +29,7 @@ e clique em **Ligar PIX automático**. Comece com uma chave em **modo de teste**
   Mesmo sem o webhook, o Venceu confere os PIX pendentes a cada poucos minutos.
 - A baixa só acontece depois de o Venceu consultar a AbacatePay com a sua chave — um aviso falso não dá baixa em nada.
 - No modo de teste, a página de pagamento mostra **Simular pagamento**, para conferir o fluxo completo.
-- Na empresa de cobrança da plataforma (Eduardo), a baixa de uma mensalidade renova automaticamente o acesso da academia.
+- Na empresa de cobrança da plataforma, a baixa de uma mensalidade renova automaticamente o acesso da academia.
 
 ## Venda online da assinatura (administração do Venceu)
 
@@ -89,7 +89,7 @@ cadastrado (mesmo WhatsApp ou e-mail) é ignorado, e as linhas com problema são
 - **Controle de envios**: mostra, para cada cobrança em atraso ou que vence no período, se o cliente já recebeu o lembrete, se falta, se está na fila ou se falhou. Selecione e envie, ou use "Enviar para quem falta".
 - **Painel**: bloco "Próximos vencimentos — hoje, 1, 2 e 3 dias", com quem já recebeu lembrete.
 
-## Plataforma: planos e acesso dos clientes (Eduardo)
+## Plataforma: planos e acesso dos clientes
 - **Ativar/Desativar acesso**: na lista de Organizações (botão na linha) ou na página da organização.
 - **Ativar plano manualmente**: na organização → "Plano e acesso" → +1 mês, +3, +6 ou 1 ano (libera e reativa).
 - **Suspensão automática**: marque "Suspender automaticamente se vencer" e a tolerância em dias.

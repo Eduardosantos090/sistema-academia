@@ -12,7 +12,7 @@ export const brand = {
   credit: 'Tecnologia desenvolvida pela PMG Code',
   /** Dados exibidos nos Termos de Uso e na Política de Privacidade. */
   legal: {
-    responsible: 'Eduardo Sobral',
+    responsible: 'Venceu App',
     contactEmail: 'venceuapp@gmail.com',
     updatedAt: '8 de outubro de 2026',
   },

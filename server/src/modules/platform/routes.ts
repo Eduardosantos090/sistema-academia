@@ -345,7 +345,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: Deps) {
     return { ok: true, accessUntil };
   });
 
-  /** Organização usada pela plataforma para cobrar os próprios clientes (ex.: a empresa do Eduardo). */
+  /** Organização usada pela plataforma para cobrar os próprios clientes (ex.: a empresa que vende o Venceu). */
   app.put('/api/platform/billing-org', async (req) => {
     const me = requirePlatform(req);
     const b = parse(z.object({ orgId: zUuid.nullable() }).strict(), req.body);
