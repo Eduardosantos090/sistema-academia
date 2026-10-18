@@ -8,6 +8,13 @@
 3. Conectado, os lembretes saem pelo número da empresa e as mensagens recebidas vão para o assistente e o Atendimento.
    Se o celular desconectar, os lembretes voltam a ficar prontos para envio manual até a nova leitura do QR Code.
 
+### Instalação da Evolution numa VPS (Ubuntu 22.04/24.04)
+
+No terminal da VPS, como root: copie `deploy/evolution/instalar.sh` para o servidor e rode `bash instalar.sh`
+(ou `bash instalar.sh whatsapp.seudominio.com.br`, se tiver um subdomínio apontando para a VPS). O script instala Docker,
+Evolution API, banco, cache e https automático (sem domínio, usa `<ip>.sslip.io`) e mostra no final o endereço e a chave
+global para colar em **Plataforma → WhatsApp (QR Code)**.
+
 O Venceu cria uma instância por empresa, já com o webhook de entrada configurado (autenticado por um segredo em cabeçalho).
 Mensagens de grupos e as enviadas pelo próprio número são ignoradas.
 
