@@ -100,6 +100,11 @@ describe('venda da assinatura do Venceu', () => {
     expect((await platform.put('/api/platform/sales', { enabled: true, apiKey: KEY, productId: PRODUCT, planName: 'X Mensal', methods: ['CARD'] })).statusCode).toBe(422);
     abacate.productCycle = 'MONTHLY';
     expect((await platform.put('/api/platform/sales', { enabled: true, apiKey: 'abc_dev_ERRADA000000', productId: PRODUCT, planName: 'X Mensal', methods: ['CARD'] })).statusCode).toBe(422);
+    // Só salvar a chave (venda pela API desligada) não depende do produto; ligar depende.
+    const save = await platform.put('/api/platform/sales', { enabled: false, apiKey: KEY, productId: 'prod_NAOEXISTE1', planName: 'Venceu Mensal', methods: ['CARD'] });
+    expect(save.statusCode).toBe(200);
+    expect(save.json().warning).toMatch(/produto não foi encontrado/i);
+    expect((await platform.put('/api/platform/sales', { enabled: true, productId: 'prod_NAOEXISTE1', planName: 'Venceu Mensal', methods: ['CARD'] })).statusCode).toBe(422);
     const s = await configure();
     expect(s).toMatchObject({ enabled: true, available: true, productId: PRODUCT, priceCents: 5000, intervalMonths: 1, methods: ['CARD', 'PIX'] });
     expect(JSON.stringify(s)).not.toContain('VENDAVENCEU');

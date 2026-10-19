@@ -164,17 +164,25 @@ export function registerSalesRoutes(app: FastifyInstance, deps: Deps) {
     let priceCents = current.priceCents;
     let intervalMonths = current.intervalMonths;
     let productName: string | null = null;
+    let warning: string | null = null;
     if (apiKey && (body.enabled || body.apiKey)) {
       try {
+        // A chave nova sempre é validada; o produto só é obrigatório com a venda pela API ligada
+        // (no modo "link", a venda usa o link de checkout e o produto não é consultado).
         if (body.apiKey) await getStore(deps, body.apiKey);
-        const p = await getProduct(deps, apiKey, body.productId);
-        if (!p.cycle || !(p.cycle in CYCLE_MONTHS)) {
-          throw new AppError(422, 'invalid', 'O produto precisa ser uma assinatura mensal, trimestral, semestral ou anual na AbacatePay.');
+        try {
+          const p = await getProduct(deps, apiKey, body.productId);
+          if (!p.cycle || !(p.cycle in CYCLE_MONTHS)) {
+            throw new AppError(422, 'invalid', 'O produto precisa ser uma assinatura mensal, trimestral, semestral ou anual na AbacatePay.');
+          }
+          if (!Number.isFinite(p.price) || p.price < 100) throw new AppError(422, 'invalid', 'Preço do produto inválido na AbacatePay.');
+          priceCents = Math.round(p.price);
+          intervalMonths = CYCLE_MONTHS[p.cycle]!;
+          productName = p.name;
+        } catch (e) {
+          if (body.enabled) throw e;
+          warning = `Chave salva. O produto não foi encontrado na AbacatePay (${e instanceof OutboundError || e instanceof AppError ? e.message : 'erro'}): confira o ID antes de ligar a venda pela API.`;
         }
-        if (!Number.isFinite(p.price) || p.price < 100) throw new AppError(422, 'invalid', 'Preço do produto inválido na AbacatePay.');
-        priceCents = Math.round(p.price);
-        intervalMonths = CYCLE_MONTHS[p.cycle]!;
-        productName = p.name;
       } catch (e) {
         if (e instanceof AppError) throw e;
         throw new AppError(422, 'invalid', e instanceof OutboundError ? e.message : 'Não foi possível validar na AbacatePay.');
@@ -194,6 +202,6 @@ export function registerSalesRoutes(app: FastifyInstance, deps: Deps) {
       `insert into audit_events (actor_id, action, entity_type, details, ip) values ($1, 'platform.sales_settings', 'platform', $2, $3)`,
       [me.id, JSON.stringify({ enabled: body.enabled, productId: body.productId, priceCents, methods: body.methods }), req.ip],
     );
-    return { ok: true, productName, priceCents, intervalMonths };
+    return { ok: true, productName, priceCents, intervalMonths, warning };
   });
 }

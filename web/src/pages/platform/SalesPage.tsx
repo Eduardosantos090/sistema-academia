@@ -35,7 +35,7 @@ export function SalesPage() {
   }, [q.data]);
   const save = useMutation({
     mutationFn: (v: { enabled: boolean; regenerateWebhookSecret?: boolean }) =>
-      api.put<{ productName: string | null; priceCents: number; intervalMonths: number }>('/api/platform/sales', {
+      api.put<{ productName: string | null; priceCents: number; intervalMonths: number; warning?: string | null }>('/api/platform/sales', {
         enabled: v.enabled,
         ...(f.apiKey ? { apiKey: f.apiKey } : {}),
         productId: f.productId,
@@ -49,6 +49,7 @@ export function SalesPage() {
       setF((x) => ({ ...x, apiKey: '' }));
       void qc.invalidateQueries({ queryKey: ['platform-sales'] });
       toast.success(v.enabled ? `Venda online ligada: ${r.productName ?? 'produto'} por ${fmtCents(r.priceCents)}/${interval(r.intervalMonths)}.` : 'Configuração salva.');
+      if (r.warning) toast.info(r.warning);
     },
     onError: (e) => {
       setErrors(fieldErrors(e));
