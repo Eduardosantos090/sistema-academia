@@ -27,6 +27,8 @@ class FakeAbacate {
         return u.searchParams.get('id') === PRODUCT
           ? ok({ id: PRODUCT, name: 'Venceu Mensal', price: 5000, cycle: this.productCycle, status: 'ACTIVE', devMode: true })
           : { status: 404, body: '{"error":"Product not found"}' };
+      case '/v2/products/list':
+        return { status: 200, body: JSON.stringify({ data: [{ id: 'prod_SOLISTA123', name: 'Venceu Lista', price: 5000, cycle: 'MONTHLY', status: 'ACTIVE', devMode: false }], error: null, pagination: { hasMore: false } }) };
       case '/v2/customers/create': return ok({ id: `cust_${++seq}`, email: JSON.parse(req.body!).email });
       case '/v2/customers/get': {
         const c = this.customers.get(u.searchParams.get('id') ?? '');
@@ -104,7 +106,16 @@ describe('venda da assinatura do Venceu', () => {
     const save = await platform.put('/api/platform/sales', { enabled: false, apiKey: KEY, productId: 'prod_NAOEXISTE1', planName: 'Venceu Mensal', methods: ['CARD'] });
     expect(save.statusCode).toBe(200);
     expect(save.json().warning).toMatch(/produto não foi encontrado/i);
-    expect((await platform.put('/api/platform/sales', { enabled: true, productId: 'prod_NAOEXISTE1', planName: 'Venceu Mensal', methods: ['CARD'] })).statusCode).toBe(422);
+    const nf = await platform.put('/api/platform/sales', { enabled: true, productId: 'prod_NAOEXISTE1', planName: 'Venceu Mensal', methods: ['CARD'] });
+    expect(nf.statusCode).toBe(422);
+    expect(nf.json().error.message).toMatch(/PRODUCT:READ/);
+    // Se a busca direta não acha, o produto é procurado na lista da loja.
+    expect((await platform.put('/api/platform/sales', { enabled: true, productId: 'prod_SOLISTA123', planName: 'Venceu Mensal', methods: ['CARD'] })).statusCode).toBe(200);
+    // Produto de compra única: mensagem clara.
+    abacate.productCycle = null;
+    const once = await platform.put('/api/platform/sales', { enabled: true, productId: PRODUCT, planName: 'Venceu Mensal', methods: ['CARD'] });
+    expect(once.json().error.message).toMatch(/compra única/);
+    abacate.productCycle = 'MONTHLY';
     const s = await configure();
     expect(s).toMatchObject({ enabled: true, available: true, productId: PRODUCT, priceCents: 5000, intervalMonths: 1, methods: ['CARD', 'PIX'] });
     expect(JSON.stringify(s)).not.toContain('VENDAVENCEU');

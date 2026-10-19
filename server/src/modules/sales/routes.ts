@@ -173,7 +173,11 @@ export function registerSalesRoutes(app: FastifyInstance, deps: Deps) {
         try {
           const p = await getProduct(deps, apiKey, body.productId);
           if (!p.cycle || !(p.cycle in CYCLE_MONTHS)) {
-            throw new AppError(422, 'invalid', 'O produto precisa ser uma assinatura mensal, trimestral, semestral ou anual na AbacatePay.');
+            throw new AppError(
+              422,
+              'invalid',
+              `O produto "${p.name}" está como compra única na AbacatePay. Para vender assinatura, crie um produto do tipo assinatura (recorrente mensal) e use o ID dele.`,
+            );
           }
           if (!Number.isFinite(p.price) || p.price < 100) throw new AppError(422, 'invalid', 'Preço do produto inválido na AbacatePay.');
           priceCents = Math.round(p.price);

@@ -127,8 +127,7 @@ export interface AbacateProduct {
   devMode: boolean;
 }
 
-export async function getProduct(deps: Deps, apiKey: string, id: string): Promise<AbacateProduct> {
-  const d = await abacateCall<Record<string, unknown>>(deps, apiKey, 'GET', `/products/get?id=${q(id)}`);
+function toProduct(d: Record<string, unknown>, id: string): AbacateProduct {
   return {
     id: String(d.id ?? id),
     name: typeof d.name === 'string' ? d.name.slice(0, 120) : 'Assinatura',
@@ -137,6 +136,22 @@ export async function getProduct(deps: Deps, apiKey: string, id: string): Promis
     status: typeof d.status === 'string' ? d.status : 'ACTIVE',
     devMode: !!d.devMode,
   };
+}
+
+/** Busca o produto pelo id; se a busca direta falhar, procura na lista de produtos da loja. */
+export async function getProduct(deps: Deps, apiKey: string, id: string): Promise<AbacateProduct> {
+  try {
+    return toProduct(await abacateCall<Record<string, unknown>>(deps, apiKey, 'GET', `/products/get?id=${q(id)}`), id);
+  } catch (e) {
+    const list = await abacateCall<unknown>(deps, apiKey, 'GET', '/products/list?limit=100').catch(() => null);
+    const found = Array.isArray(list) ? (list as Record<string, unknown>[]).find((p) => p && p.id === id) : undefined;
+    if (found) return toProduct(found, id);
+    throw e instanceof OutboundError && /not found/i.test(e.message)
+      ? new OutboundError(
+          'A AbacatePay não encontrou esse produto com esta chave. Confira o ID e se a chave tem a permissão de leitura de produtos (PRODUCT:READ).',
+        )
+      : e;
+  }
 }
 
 export async function createCustomer(deps: Deps, apiKey: string, c: { email: string; name: string; cellphone?: string | null; taxId?: string | null }) {
