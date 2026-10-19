@@ -49,7 +49,7 @@ export function WhatsAppServerPage() {
           vê o botão <strong>Conectar com QR Code</strong>.
         </Alert>
         <TextField label="Endereço do servidor" value={url} onChange={(e) => setUrl(e.target.value)} error={errors.url} placeholder="https://whatsapp.seudominio.com.br" />
-        <TextField label={s.keyHint ? `Chave global (atual: ${s.keyHint})` : 'Chave global'} type="password" autoComplete="off" value={apiKey}
+        <TextField label={s.keyHint ? `Chave global (atual: ${s.keyHint})` : 'Chave global'} type="password" autoComplete="new-password" spellCheck={false} value={apiKey}
           onChange={(e) => setApiKey(e.target.value)} error={errors.apiKey} placeholder={s.keyHint ? 'Em branco mantém a chave atual' : ''} />
         <div className="form-actions">
           {s.configured && <Button variant="ghost" loading={save.isPending} onClick={() => save.mutate({ url: null })}>Desligar</Button>}

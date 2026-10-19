@@ -79,7 +79,7 @@ export function SalesPage() {
         <TextField label="Link de checkout da AbacatePay (opcional)" value={f.checkoutUrl} onChange={(e) => setF({ ...f, checkoutUrl: e.target.value })}
           error={errors.checkoutUrl} placeholder="https://app.abacatepay.com/pay/bill_…"
           hint="Link fixo criado no painel da AbacatePay. Usado quando a venda pela API está desligada." />
-        <TextField label={s.keyHint ? `Chave da API v2 da AbacatePay (atual: ${s.keyHint})` : 'Chave da API v2 da AbacatePay'} type="password" autoComplete="off"
+        <TextField label={s.keyHint ? `Chave da API v2 da AbacatePay (atual: ${s.keyHint})` : 'Chave da API v2 da AbacatePay'} type="password" autoComplete="new-password" spellCheck={false}
           value={f.apiKey} onChange={(e) => setF({ ...f, apiKey: e.target.value })} error={errors.apiKey}
           placeholder={s.keyHint ? 'Em branco mantém a chave atual' : 'abc_…'}
           hint="Painel da AbacatePay → Integração → Chaves de API. Precisa das permissões de clientes, produtos e assinaturas." />

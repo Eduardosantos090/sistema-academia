@@ -350,9 +350,9 @@ function WhatsAppTab({ s }: { s: Settings }) {
           </ol>
           <div className="form-grid">
             <TextField label="ID do número de telefone" value={phoneNumberId} onChange={(e) => setPhoneNumberId(e.target.value)} error={errors.phoneNumberId} inputMode="numeric" />
-            <TextField label="Token de acesso" type="password" value={accessToken} onChange={(e) => setAccessToken(e.target.value)} autoComplete="off"
+            <TextField label="Token de acesso" type="password" value={accessToken} onChange={(e) => setAccessToken(e.target.value)} autoComplete="new-password"
               placeholder={c.hasAccessToken ? '•••••••• (configurado — deixe vazio para manter)' : ''} />
-            <TextField label="App Secret" type="password" value={appSecret} onChange={(e) => setAppSecret(e.target.value)} autoComplete="off"
+            <TextField label="App Secret" type="password" value={appSecret} onChange={(e) => setAppSecret(e.target.value)} autoComplete="new-password"
               placeholder={c.hasAppSecret ? '•••••••• (configurado — deixe vazio para manter)' : ''} hint="Usado para validar a assinatura das mensagens recebidas." />
           </div>
           {c.cloudWebhookUrl && (
