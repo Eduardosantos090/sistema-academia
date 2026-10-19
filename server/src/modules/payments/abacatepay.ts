@@ -154,6 +154,25 @@ export async function getProduct(deps: Deps, apiKey: string, id: string): Promis
   }
 }
 
+/** Cria um produto de assinatura (com ciclo) — o painel da AbacatePay só cria produtos avulsos. */
+export async function createSubscriptionProduct(
+  deps: Deps,
+  apiKey: string,
+  p: { externalId: string; name: string; priceCents: number; cycle: 'MONTHLY' | 'QUARTERLY' | 'SEMIANNUALLY' | 'ANNUALLY'; description?: string; imageUrl?: string },
+): Promise<AbacateProduct> {
+  const d = await abacateCall<Record<string, unknown>>(deps, apiKey, 'POST', '/products/create', {
+    externalId: p.externalId,
+    name: p.name,
+    price: p.priceCents,
+    currency: 'BRL',
+    cycle: p.cycle,
+    ...(p.description ? { description: p.description } : {}),
+    ...(p.imageUrl ? { imageUrl: p.imageUrl } : {}),
+  });
+  if (typeof d.id !== 'string' || !ID_RE.test(d.id)) throw new OutboundError('AbacatePay: resposta inesperada ao criar o produto.');
+  return toProduct(d, d.id);
+}
+
 export async function createCustomer(deps: Deps, apiKey: string, c: { email: string; name: string; cellphone?: string | null; taxId?: string | null }) {
   const d = await abacateCall<{ id?: unknown }>(deps, apiKey, 'POST', '/customers/create', {
     email: c.email,

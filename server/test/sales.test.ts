@@ -27,6 +27,11 @@ class FakeAbacate {
         return u.searchParams.get('id') === PRODUCT
           ? ok({ id: PRODUCT, name: 'Venceu Mensal', price: 5000, cycle: this.productCycle, status: 'ACTIVE', devMode: true })
           : { status: 404, body: '{"error":"Product not found"}' };
+      case '/v2/products/create': {
+        const b = JSON.parse(req.body!);
+        if (!b.cycle || b.currency !== 'BRL' || !b.externalId) return { status: 400, body: '{"error":"invalid"}' };
+        return ok({ id: 'prod_CRIADOAPI1', name: b.name, price: b.price, cycle: b.cycle, status: 'ACTIVE', devMode: false });
+      }
       case '/v2/products/list':
         return { status: 200, body: JSON.stringify({ data: [{ id: 'prod_SOLISTA123', name: 'Venceu Lista', price: 5000, cycle: 'MONTHLY', status: 'ACTIVE', devMode: false }], error: null, pagination: { hasMore: false } }) };
       case '/v2/customers/create': return ok({ id: `cust_${++seq}`, email: JSON.parse(req.body!).email });
@@ -241,6 +246,18 @@ describe('venda da assinatura do Venceu', () => {
     await ctx.owner.query('update platform_settings set sale_link_checked_at = null where id = 1');
     await pollSignups(ctx.deps, 10);
     expect((await ctx.owner.query('select count(*)::int as n from users where email in ($1, $2)', [email, email2])).rows[0].n).toBe(2);
+    await configure();
+  });
+
+  it('cria o produto de assinatura mensal pela API e passa a usá-lo', async () => {
+    await configure();
+    const r = await platform.post('/api/platform/sales/create-product', { name: 'Venceu Mensal', priceCents: 5000, cycle: 'MONTHLY' });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().productId).toBe('prod_CRIADOAPI1');
+    const body = JSON.parse(ctx.http.calls.filter((c) => c.url.endsWith('/v2/products/create')).at(-1)!.req.body!);
+    expect(body).toMatchObject({ price: 5000, currency: 'BRL', cycle: 'MONTHLY' });
+    expect(json(await platform.get('/api/platform/sales')).productId).toBe('prod_CRIADOAPI1');
+    expect((await new Agent(ctx).post('/api/platform/sales/create-product', {})).statusCode).toBe(401);
     await configure();
   });
 

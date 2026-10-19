@@ -9,7 +9,7 @@ import { encryptSecret } from '../../lib/secrets.js';
 import { OutboundError } from '../../lib/http.js';
 import { zEmail, zOptionalDocument, zOptionalPhone, zPassword, zText } from '../../lib/normalize.js';
 import { SEGMENTS } from '../platform/routes.js';
-import { getProduct, getStore, signatureOk, zAbacateKeyRe } from '../payments/abacatepay.js';
+import { createSubscriptionProduct, getProduct, getStore, signatureOk, zAbacateKeyRe } from '../payments/abacatepay.js';
 import { checkSignup, handleSubscriptionEvent, loadSaleConfig, saleAvailable, saleMode, startSignup } from './service.js';
 
 const CYCLE_MONTHS: Record<string, number> = { MONTHLY: 1, QUARTERLY: 3, SEMIANNUALLY: 6, ANNUALLY: 12, YEARLY: 12 };
@@ -134,6 +134,50 @@ export function registerSalesRoutes(app: FastifyInstance, deps: Deps) {
       webhookSecret: c.webhookSecret,
       signups: rows,
     };
+  });
+
+  /** Cria na AbacatePay o produto de assinatura (ciclo mensal etc.) e já o usa na venda. */
+  app.post('/api/platform/sales/create-product', async (req) => {
+    const me = requirePlatform(req);
+    const body = parse(
+      z
+        .object({
+          name: zText(2, 80).default('Venceu Mensal'),
+          priceCents: z.coerce.number().int().min(100, 'Valor mínimo R$ 1,00.').max(100_000_000).default(5000),
+          cycle: z.enum(['MONTHLY', 'QUARTERLY', 'SEMIANNUALLY', 'ANNUALLY']).default('MONTHLY'),
+        })
+        .strict(),
+      req.body ?? {},
+    );
+    await deps.limiters.sendNow.consume(`u:${me.id}`);
+    const c = await loadSaleConfig(deps);
+    if (!c.apiKey) throw new AppError(409, 'conflict', 'Salve primeiro a chave da API da AbacatePay.');
+    let p;
+    try {
+      p = await createSubscriptionProduct(deps, c.apiKey, {
+        externalId: `venceu-${body.cycle.toLowerCase()}-${Date.now()}`,
+        name: body.name,
+        priceCents: body.priceCents,
+        cycle: body.cycle,
+        description: 'Venceu — lembretes de vencimento com automação de chatbot.',
+        imageUrl: `${deps.config.appUrl}/brand/venceu-logo-completa.png`,
+      });
+    } catch (e) {
+      throw new AppError(
+        422,
+        'invalid',
+        e instanceof OutboundError ? `${e.message} (a chave precisa da permissão de criar produtos, PRODUCT:CREATE)` : 'Não foi possível criar o produto.',
+      );
+    }
+    await deps.pools.owner.query(
+      `update platform_settings set sale_product_id = $1, sale_plan_name = $2, sale_price_cents = $3, sale_interval_months = $4, updated_at = now() where id = 1`,
+      [p.id, body.name, body.priceCents, CYCLE_MONTHS[body.cycle]!],
+    );
+    await deps.pools.owner.query(
+      `insert into audit_events (actor_id, action, entity_type, details, ip) values ($1, 'platform.sales_product_created', 'platform', $2, $3)`,
+      [me.id, JSON.stringify({ productId: p.id, priceCents: body.priceCents, cycle: body.cycle }), req.ip],
+    );
+    return { ok: true, productId: p.id, name: body.name, priceCents: body.priceCents };
   });
 
   app.put('/api/platform/sales', async (req) => {

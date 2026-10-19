@@ -56,6 +56,21 @@ export function SalesPage() {
       toast.error(e);
     },
   });
+  const [newPrice, setNewPrice] = useState('50,00');
+  const createProduct = useMutation({
+    mutationFn: () =>
+      api.post<{ productId: string; priceCents: number }>('/api/platform/sales/create-product', {
+        name: f.planName || 'Venceu Mensal',
+        priceCents: Math.round(Number(newPrice.replace(/\./g, '').replace(',', '.')) * 100),
+        cycle: 'MONTHLY',
+      }),
+    onSuccess: (r) => {
+      setF((x) => ({ ...x, productId: r.productId }));
+      void qc.invalidateQueries({ queryKey: ['platform-sales'] });
+      toast.success(`Produto de assinatura criado (${r.productId}). Agora clique em "Ligar venda pela API".`);
+    },
+    onError: (e) => toast.error(e),
+  });
   if (q.isLoading) return <Loading />;
   if (q.error || !q.data) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
   const s = q.data;
@@ -101,6 +116,22 @@ export function SalesPage() {
           </Button>
         </div>
       </section>
+
+      {s.keyHint && (
+        <section className="card card-body stack" style={{ maxWidth: 820 }}>
+          <h2>Produto de assinatura</h2>
+          <p className="muted small" style={{ margin: 0 }}>
+            O painel da AbacatePay só cria produtos de compra única. Este botão cria, pela API, o produto com cobrança <strong>mensal</strong> e
+            já coloca o ID dele acima. Depois é só clicar em <strong>Ligar venda pela API</strong>.
+          </p>
+          <div className="row" style={{ alignItems: 'flex-end' }}>
+            <div style={{ width: 180 }}>
+              <TextField label="Valor mensal (R$)" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} inputMode="decimal" />
+            </div>
+            <Button loading={createProduct.isPending} onClick={() => createProduct.mutate()}>Criar produto de assinatura mensal</Button>
+          </div>
+        </section>
+      )}
 
       {s.keyHint && s.webhookSecret && (
         <section className="card card-body stack" style={{ maxWidth: 820 }}>
