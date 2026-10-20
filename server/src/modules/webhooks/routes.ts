@@ -4,7 +4,7 @@ import type { Deps } from '../../lib/context.js';
 import { safeEqual } from '../../lib/crypto.js';
 import { hmacHex } from '../../lib/secrets.js';
 import { normalizePhone } from '../../lib/normalize.js';
-import { loadChannels, sendWhatsAppWithMedia, signWebhook } from '../channels/service.js';
+import { loadChannels, replyTypingPlan, sendWhatsAppWithMedia, signWebhook } from '../channels/service.js';
 import { mediaKind, mediaUrl } from '../../lib/media.js';
 import { handleIncoming, loadBotOrg } from '../bot/engine.js';
 
@@ -76,9 +76,10 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: Deps) {
         m.text?.body ?? m.button?.text ?? m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title ?? `[${m.type ?? 'mensagem'} recebida]`;
       const r = await handleIncoming(deps, org, phone, String(text).slice(0, 4096), m.id ? String(m.id).slice(0, 200) : null);
       if (c.mode === 'cloud_api') {
+        const typing = replyTypingPlan(org.bot_reply_delay_seconds, r.replies.length);
         for (const [i, reply] of r.replies.entries()) {
           const media = i === 0 && r.media ? { url: mediaUrl(deps.config.appUrl, r.media), mime: r.media.mime, name: r.media.name } : null;
-          await sendWhatsAppWithMedia(deps, org, c, { to: phone, body: reply, media }).catch((err) =>
+          await sendWhatsAppWithMedia(deps, org, c, { to: phone, body: reply, media, typingMs: typing[i] }).catch((err) =>
             req.log.warn({ err: { message: (err as Error).message } }, 'falha ao responder pelo WhatsApp'),
           );
         }

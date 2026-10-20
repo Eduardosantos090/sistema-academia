@@ -9,6 +9,8 @@ export interface HttpResult {
 
 export interface HttpRequest {
   method: 'GET' | 'POST' | 'DELETE';
+  /** Tempo máximo sem resposta (padrão 10 s). */
+  timeoutMs?: number;
   headers?: Record<string, string>;
   body?: string;
 }
@@ -100,7 +102,7 @@ export const safeFetch: HttpFetch = (rawUrl, req) =>
         method: req.method,
         headers: { 'user-agent': 'Venceu/1.0', ...(req.headers ?? {}) },
         lookup: lookup as never,
-        timeout: 10_000,
+        timeout: Math.min(Math.max(req.timeoutMs ?? 10_000, 1000), 25_000),
       },
       (res) => {
         const chunks: Buffer[] = [];

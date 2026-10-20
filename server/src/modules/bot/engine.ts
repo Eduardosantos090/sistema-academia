@@ -23,6 +23,8 @@ export interface BotOrg {
   contact_phone: string | null;
   bot_enabled: boolean;
   bot_greeting: string | null;
+  /** Espera antes de cada resposta automática (0 a 8 s). */
+  bot_reply_delay_seconds: number;
   today: string;
 }
 
@@ -250,7 +252,7 @@ async function loadContext(db: Db, orgId: string, customerIds: string[], appUrl:
 
 export async function loadBotOrg(db: Db | Deps['pools']['owner'], where: { id?: string; webhookId?: string }) {
   const { rows } = await db.query<BotOrg & { is_active: boolean }>(
-    `select id, name, slug, pix_key, payment_instructions, contact_phone, bot_enabled, bot_greeting, is_active,
+    `select id, name, slug, pix_key, payment_instructions, contact_phone, bot_enabled, bot_greeting, is_active, bot_reply_delay_seconds,
             to_char((now() at time zone timezone)::date, 'YYYY-MM-DD') as today
        from organizations where ${where.id ? 'id = $1' : 'webhook_id = $1'}`,
     [where.id ?? where.webhookId],

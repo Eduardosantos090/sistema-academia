@@ -114,21 +114,50 @@ export async function deleteInstance(deps: Deps, s: EvolutionServer, name: strin
 
 type MediaKind = 'image' | 'audio' | 'video' | 'document';
 
+/** POST com tempo de espera maior (o envio com "digitando…" só responde depois do delay). */
+async function callTimed<T>(deps: Deps, base: string, apikey: string, path: string, body: unknown, timeoutMs: number): Promise<T> {
+  const res = await deps.fetch(`${base}${path}`, {
+    method: 'POST',
+    headers: { apikey, 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(body),
+    timeoutMs,
+  });
+  let json: unknown = null;
+  try {
+    json = JSON.parse(res.body);
+  } catch {
+    /* corpo não-JSON */
+  }
+  if (res.status === 401 || res.status === 403) throw new OutboundError('Servidor de WhatsApp recusou a chave.');
+  if (res.status < 200 || res.status >= 300) {
+    const j = json as { response?: { message?: unknown }; message?: unknown } | null;
+    const m = j?.response?.message ?? j?.message;
+    const msg = Array.isArray(m) ? String(m[0]) : typeof m === 'string' ? m : `HTTP ${res.status}`;
+    throw new OutboundError(`WhatsApp: ${msg.slice(0, 200)}`);
+  }
+  return json as T;
+}
+
 /** Envia texto, mídia (com legenda) ou áudio de voz. Devolve o id da mensagem no WhatsApp. */
 export async function evoSend(
   deps: Deps,
   s: EvolutionServer,
   inst: { name: string; token: string },
-  msg: { number: string; text: string; media?: { url: string; mime: string; name: string; kind: MediaKind } | null },
+  msg: { number: string; text: string; media?: { url: string; mime: string; name: string; kind: MediaKind } | null; typingMs?: number },
 ): Promise<string | null> {
   const path = (p: string) => `/message/${p}/${encodeURIComponent(inst.name)}`;
+  // "delay": a Evolution mostra "digitando…"/"gravando…" por esse tempo antes de enviar.
+  const typing = Math.min(Math.max(Math.round(msg.typingMs ?? 0), 0), 8000);
+  const extra = typing ? { delay: typing } : {};
+  const post = (p: string, body: Record<string, unknown>) =>
+    callTimed<{ key?: { id?: unknown } }>(deps, s.url, inst.token, path(p), { ...body, ...extra }, typing + 10_000);
   let d: { key?: { id?: unknown } };
   if (!msg.media) {
-    d = await call(deps, s.url, inst.token, 'POST', path('sendText'), { number: msg.number, text: msg.text });
+    d = await post('sendText', { number: msg.number, text: msg.text });
   } else if (msg.media.kind === 'audio') {
-    d = await call(deps, s.url, inst.token, 'POST', path('sendWhatsAppAudio'), { number: msg.number, audio: msg.media.url });
+    d = await post('sendWhatsAppAudio', { number: msg.number, audio: msg.media.url });
   } else {
-    d = await call(deps, s.url, inst.token, 'POST', path('sendMedia'), {
+    d = await post('sendMedia', {
       number: msg.number,
       mediatype: msg.media.kind,
       mimetype: msg.media.mime,

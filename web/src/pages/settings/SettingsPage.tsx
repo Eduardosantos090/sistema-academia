@@ -14,7 +14,7 @@ interface Settings {
   organization: {
     id: string; name: string; slug: string; segment: string; contactEmail: string | null; contactPhone: string | null; document: string | null;
     pixKey: string | null; paymentInstructions: string | null; timezone: string; sendHour: number; notifyOnPayment: boolean;
-    botEnabled: boolean; botGreeting: string | null; sendDelaySeconds: number;
+    botEnabled: boolean; botGreeting: string | null; sendDelaySeconds: number; botReplyDelaySeconds: number;
   };
   channels: {
     whatsappMode: WhatsAppMode; whatsappAutomatic: boolean; phoneNumberId: string | null; hasAccessToken: boolean; hasAppSecret: boolean;
@@ -116,7 +116,7 @@ function BillingTab({ s, canEdit }: { s: Settings; canEdit: boolean }) {
   const { m, errors } = useSaveOrg();
   const [f, setF] = useState({
     pixKey: o.pixKey ?? '', paymentInstructions: o.paymentInstructions ?? '', sendHour: String(o.sendHour), notifyOnPayment: o.notifyOnPayment,
-    botEnabled: o.botEnabled, botGreeting: o.botGreeting ?? '', timezone: o.timezone,
+    botEnabled: o.botEnabled, botGreeting: o.botGreeting ?? '', timezone: o.timezone, botReplyDelay: String(o.botReplyDelaySeconds ?? 3),
     delayValue: String(o.sendDelaySeconds % 60 === 0 && o.sendDelaySeconds >= 60 ? o.sendDelaySeconds / 60 : o.sendDelaySeconds),
     delayUnit: o.sendDelaySeconds % 60 === 0 && o.sendDelaySeconds >= 60 ? 'min' : 's',
   });
@@ -127,6 +127,7 @@ function BillingTab({ s, canEdit }: { s: Settings; canEdit: boolean }) {
       m.mutate({
         pixKey: f.pixKey || null, paymentInstructions: f.paymentInstructions || null, sendHour: Number(f.sendHour), notifyOnPayment: f.notifyOnPayment,
         botEnabled: f.botEnabled, botGreeting: f.botGreeting || null, timezone: f.timezone, sendDelaySeconds: delaySeconds,
+        botReplyDelaySeconds: Math.min(8, Math.max(0, Math.round(Number(f.botReplyDelay) || 0))),
       });
     }}>
       <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: 0 }} className="stack">
@@ -166,6 +167,11 @@ function BillingTab({ s, canEdit }: { s: Settings; canEdit: boolean }) {
             hint="Desligado: as mensagens chegam no Atendimento para a equipe responder." />
           <TextArea label="Saudação (opcional)" value={f.botGreeting} onChange={(e) => setF({ ...f, botGreeting: e.target.value })} rows={2} maxLength={500}
             error={errors.botGreeting} placeholder="Olá, {{primeiro_nome}}! 💪 Aqui é o assistente da {{empresa}}." hint="Mostrada antes do menu. Aceita {{primeiro_nome}} e {{empresa}}." />
+          <SelectField label="Tempo de resposta do assistente" value={f.botReplyDelay} onChange={(e) => setF({ ...f, botReplyDelay: e.target.value })}
+            hint="Espera antes de responder, para a conversa não parecer robô nem spam. No WhatsApp por QR Code o cliente vê “digitando…” nesse tempo.">
+            <option value="0">Imediato</option>
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => <option key={n} value={String(n)}>{n} segundo{n > 1 ? 's' : ''}{n === 3 ? ' (recomendado)' : ''}</option>)}
+          </SelectField>
         </section>
       </fieldset>
       {canEdit && <div className="form-actions"><Button type="submit" variant="primary" loading={m.isPending}>Salvar</Button></div>}

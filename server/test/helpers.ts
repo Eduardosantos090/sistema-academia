@@ -132,6 +132,8 @@ export async function createOrg(ctx: TestCtx, platform: Agent, name = uniq('Acad
   const r = await platform.post('/api/platform/orgs', { name, segment: 'academia', ownerName: 'Dono Teste', ownerEmail });
   if (r.statusCode !== 201) throw new Error(r.body);
   const orgId = r.json().id as string;
+  // Nos testes, o assistente responde sem espera (o atraso é testado à parte).
+  await ctx.owner.query('update organizations set bot_reply_delay_seconds = 0 where id = $1', [orgId]);
   const owner = await accept(ctx, ownerEmail);
   return { orgId, owner, ownerEmail };
 }

@@ -10,7 +10,7 @@ import { OutboundError, validateOutboundUrl } from '../../lib/http.js';
 import { normalizePhone } from '../../lib/normalize.js';
 import { mediaUrl } from '../../lib/media.js';
 import { handleIncoming, loadBotOrg } from '../bot/engine.js';
-import { loadChannels, sendWhatsAppWithMedia } from './service.js';
+import { loadChannels, replyTypingPlan, sendWhatsAppWithMedia } from './service.js';
 import {
   checkServer,
   connectInstance,
@@ -167,9 +167,10 @@ export function registerQrCodeRoutes(app: FastifyInstance, deps: Deps) {
         if (!phone || !text) continue;
         const r = await handleIncoming(deps, org, phone, text, typeof m.key.id === 'string' ? m.key.id.slice(0, 200) : null);
         if (c.mode === 'qrcode') {
+          const typing = replyTypingPlan(org.bot_reply_delay_seconds, r.replies.length);
           for (const [i, replyText] of r.replies.entries()) {
             const media = i === 0 && r.media ? { url: mediaUrl(deps.config.appUrl, r.media), mime: r.media.mime, name: r.media.name } : null;
-            await sendWhatsAppWithMedia(deps, org, c, { to: phone, body: replyText, media }).catch((err) =>
+            await sendWhatsAppWithMedia(deps, org, c, { to: phone, body: replyText, media, typingMs: typing[i] }).catch((err) =>
               req.log.warn({ err: { message: (err as Error).message } }, 'falha ao responder pelo WhatsApp (QR Code)'),
             );
           }

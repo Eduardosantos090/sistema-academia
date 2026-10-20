@@ -116,9 +116,12 @@ export async function sendWhatsApp(
   deps: Deps,
   org: { slug: string },
   c: ChannelConfig,
-  msg: { to: string; body: string; template?: WaTemplate | null; messageId?: string; media?: OutMedia | null },
+  msg: { to: string; body: string; template?: WaTemplate | null; messageId?: string; media?: OutMedia | null; typingMs?: number },
 ): Promise<{ providerId: string | null }> {
   const digits = msg.to.replace(/\D/g, '');
+  // Espera antes de responder (assistente). No QR Code a Evolution mostra "digitando…" nesse tempo.
+  const typingMs = Math.min(Math.max(msg.typingMs ?? 0, 0), 8000);
+  if (typingMs && c.mode !== 'qrcode') await new Promise((r) => setTimeout(r, typingMs));
   if (c.mode === 'cloud_api') {
     if (!c.phoneNumberId || !c.accessToken) throw new OutboundError('WhatsApp Cloud API não configurada.');
     const kind = msg.media ? mediaKind(msg.media.mime) : null;
@@ -203,6 +206,7 @@ export async function sendWhatsApp(
       number: digits,
       text: msg.body,
       media: msg.media && kind ? { ...msg.media, kind } : null,
+      typingMs,
     });
     return { providerId };
   }
@@ -224,12 +228,26 @@ export async function sendWhatsAppWithMedia(
   deps: Deps,
   org: { slug: string },
   c: ChannelConfig,
-  msg: { to: string; body: string; template?: WaTemplate | null; messageId?: string; media?: OutMedia | null },
+  msg: { to: string; body: string; template?: WaTemplate | null; messageId?: string; media?: OutMedia | null; typingMs?: number },
 ) {
   if (!msg.media || (c.mode !== 'cloud_api' && c.mode !== 'qrcode')) return sendWhatsApp(deps, org, c, msg);
   const kind = mediaKind(msg.media.mime);
   if (!msg.template && kind !== 'audio' && msg.body.length <= 1024) return sendWhatsApp(deps, org, c, msg);
   const first = msg.body || msg.template ? await sendWhatsApp(deps, org, c, { ...msg, media: null }) : null;
-  const second = await sendWhatsApp(deps, org, c, { to: msg.to, body: '', media: msg.media });
+  const second = await sendWhatsApp(deps, org, c, { to: msg.to, body: '', media: msg.media, typingMs: first ? 1000 : msg.typingMs });
   return { providerId: first?.providerId ?? second.providerId };
+}
+
+/**
+ * Tempo de "digitando…" antes de cada resposta do assistente: a primeira espera o
+ * tempo configurado; as seguintes, até 1,5 s. Total limitado a 8 s (limite da função).
+ */
+export function replyTypingPlan(delaySeconds: number, count: number): number[] {
+  const base = Math.min(Math.max(delaySeconds, 0), 8) * 1000;
+  let left = 8000;
+  return Array.from({ length: count }, (_, i) => {
+    const t = Math.min(i === 0 ? base : Math.min(base, 1500), left);
+    left -= t;
+    return t;
+  });
 }

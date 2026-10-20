@@ -38,6 +38,7 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
         `select id, name, slug, segment, contact_email as "contactEmail", contact_phone as "contactPhone", document,
                 pix_key as "pixKey", payment_instructions as "paymentInstructions", timezone, send_hour as "sendHour",
                 notify_on_payment as "notifyOnPayment", bot_enabled as "botEnabled", bot_greeting as "botGreeting",
+                bot_reply_delay_seconds as "botReplyDelaySeconds",
                 webhook_id as "webhookId", send_delay_seconds as "sendDelaySeconds",
                 plan_name as "planName", to_char(access_until, 'YYYY-MM-DD') as "accessUntil"
            from organizations where id = $1`,
@@ -94,6 +95,7 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
           sendDelaySeconds: z.coerce.number().int().min(0).max(3600).optional(),
           notifyOnPayment: z.boolean().optional(),
           botEnabled: z.boolean().optional(),
+          botReplyDelaySeconds: z.coerce.number().int().min(0).max(8).optional(),
           botGreeting: z
             .string()
             .nullish()
@@ -109,6 +111,7 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: Deps) {
       pixKey: 'pix_key', paymentInstructions: 'payment_instructions', timezone: 'timezone', sendHour: 'send_hour',
       sendDelaySeconds: 'send_delay_seconds',
       notifyOnPayment: 'notify_on_payment', botEnabled: 'bot_enabled', botGreeting: 'bot_greeting',
+      botReplyDelaySeconds: 'bot_reply_delay_seconds',
     };
     const sets: string[] = [];
     const params: unknown[] = [me.orgId];

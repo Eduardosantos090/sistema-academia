@@ -116,7 +116,7 @@ describe('webhook de entrada', () => {
 });
 
 describe('lógica do assistente', () => {
-  const orgRow = { id: 'x', name: 'Studio', slug: 's', pix_key: null, payment_instructions: null, contact_phone: null, bot_enabled: true, bot_greeting: null, today: '2026-10-10' };
+  const orgRow = { id: 'x', name: 'Studio', slug: 's', pix_key: null, payment_instructions: null, contact_phone: null, bot_enabled: true, bot_greeting: null, bot_reply_delay_seconds: 0, today: '2026-10-10' };
   it('normaliza acentos e pontuação', () => {
     expect(normalizeText('  Já PAGUEI!!! ')).toBe('ja paguei');
   });

@@ -52,6 +52,15 @@ beforeEach(() => {
 });
 afterAll(() => ctx.close());
 
+describe('tempo de resposta do assistente', () => {
+  it('primeira resposta espera o tempo configurado; demais até 1,5 s; total até 8 s', async () => {
+    const { replyTypingPlan } = await import('../src/modules/channels/service.js');
+    expect(replyTypingPlan(3, 3)).toEqual([3000, 1500, 1500]);
+    expect(replyTypingPlan(8, 3)).toEqual([8000, 0, 0]);
+    expect(replyTypingPlan(0, 2)).toEqual([0, 0]);
+  });
+});
+
 describe('WhatsApp por QR Code (Evolution API)', () => {
   it('plataforma configura o servidor; empresa conecta lendo o QR Code e passa a enviar e receber', async () => {
     expect((await platform.put('/api/platform/whatsapp-server', { url: EVO, apiKey: 'errada-123456' })).statusCode).toBe(422);
@@ -96,10 +105,15 @@ describe('WhatsApp por QR Code (Evolution API)', () => {
     const msg = { event: 'messages.upsert', instance: name, data: { key: { remoteJid: '5511966665555@s.whatsapp.net', fromMe: false, id: 'WAMID1' }, message: { conversation: '1' } } };
     expect((await anon.post(hook, msg)).statusCode).toBe(403);
     expect((await anon.request('POST', hook, msg, { 'x-venceu-token': 'errado' })).statusCode).toBe(403);
+    // Tempo de resposta do assistente: 3 s de "digitando…" (só nas respostas, não nos lembretes).
+    expect(txt.body.delay).toBeUndefined();
+    expect((await owner.patch('/api/settings/organization', { botReplyDelaySeconds: 3 })).statusCode).toBe(200);
+    expect(json(await owner.get('/api/settings')).organization.botReplyDelaySeconds).toBe(3);
     const before = evo.sent.length;
     expect((await anon.request('POST', hook, msg, { 'x-venceu-token': secret })).statusCode).toBe(200);
     expect(evo.sent.length).toBeGreaterThan(before);
     expect(String(evo.sent.at(-1)!.body.text)).toMatch(/vencimento|aberto|R\$/i);
+    expect(evo.sent[before]!.body.delay).toBe(3000);
     // Mensagens de grupo e as enviadas pelo próprio número são ignoradas.
     const n = evo.sent.length;
     await anon.request('POST', hook, { ...msg, data: { ...msg.data, key: { remoteJid: '123-456@g.us', fromMe: false, id: 'G1' } } }, { 'x-venceu-token': secret });
