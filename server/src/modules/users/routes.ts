@@ -6,6 +6,7 @@ import { withTx } from '../../lib/db.js';
 import { badRequest, conflict, forbidden, notFound } from '../../lib/errors.js';
 import { parse } from '../../lib/validate.js';
 import { zEmail, zText, zUuid } from '../../lib/normalize.js';
+import { mailErrorReason } from '../../lib/mailer.js';
 import {
   ADMIN_RESET_TTL_MINUTES,
   INVITE_TTL_HOURS,
@@ -29,8 +30,14 @@ export const ACCESS_STATUS_SQL = `case
  */
 export async function deliverInvite(deps: Deps, email: string, name: string, token: string) {
   if (deps.config.mailMode === 'manual') return { inviteLink: inviteLink(deps, token), validHours: INVITE_TTL_HOURS };
-  await sendInviteEmail(deps, email, name, token);
-  return { inviteSent: true };
+  try {
+    await sendInviteEmail(deps, email, name, token);
+    return { inviteSent: true };
+  } catch (e) {
+    // E-mail fora do ar não impede o cadastro: o link volta para ser enviado por outro canal.
+    console.warn('convite: falha no envio do e-mail', (e as { code?: string }).code ?? 'erro');
+    return { inviteLink: inviteLink(deps, token), validHours: INVITE_TTL_HOURS, mailError: mailErrorReason(e) };
+  }
 }
 
 export async function inviteUser(deps: Deps, userId: string, createdBy: string) {

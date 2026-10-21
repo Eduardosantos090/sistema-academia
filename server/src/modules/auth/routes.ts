@@ -10,7 +10,7 @@ export function sessionCookieName(deps: Deps) {
   return deps.config.secureCookies ? '__Host-vc_session' : 'vc_session';
 }
 
-function setSessionCookie(deps: Deps, reply: FastifyReply, token: string) {
+export function setSessionCookie(deps: Deps, reply: FastifyReply, token: string) {
   reply.setCookie(sessionCookieName(deps), token, {
     httpOnly: true,
     secure: deps.config.secureCookies,

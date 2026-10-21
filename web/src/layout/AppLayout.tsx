@@ -3,9 +3,10 @@ import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../auth/AuthContext';
-import { api } from '../api/client';
+import { api, ApiError } from '../api/client';
 import { fmtDate, roleLabel, initials } from '../lib/format';
-import { Button } from '../components/ui';
+import { Button, useToast } from '../components/ui';
+import { useQueryClient } from '@tanstack/react-query';
 import { Icon, type IconName } from '../components/icons';
 import { brand } from '../brand';
 
@@ -42,10 +43,40 @@ interface Counters {
   accessDaysLeft: number | null;
   graceDays: number;
   autoSuspend: boolean;
+  subscriptionStatus?: string | null;
+  canSubscribe?: boolean;
 }
 
 /** Aviso do plano do Venceu para a organização (vencendo ou vencido). */
-function PlanBanner({ c }: { c: Counters }) {
+function PlanBanner({ c, isOwner }: { c: Counters; isOwner: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const subscribe = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api.post<{ url: string }>('/api/billing/subscribe');
+      window.location.assign(r.url);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Não foi possível abrir o pagamento.');
+      setBusy(false);
+    }
+  };
+  // Conta em teste (criada pelo site) ou plano sem assinatura: oferece assinar direto.
+  if (c.canSubscribe && c.accessDaysLeft !== null) {
+    const late = c.accessDaysLeft < 0;
+    return (
+      <div className={`alert ${late || c.accessDaysLeft <= 2 ? 'alert-warning' : 'alert-info'}`} role="status" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ flex: 1, minWidth: 220 }}>
+          {late
+            ? `Seu acesso venceu em ${fmtDate(c.accessUntil)}. Assine para continuar usando.`
+            : `Seu acesso vai até ${fmtDate(c.accessUntil)} (${c.accessDaysLeft === 0 ? 'termina hoje' : `${c.accessDaysLeft} dia(s)`}).${isOwner ? ' Assine para não perder o acesso.' : ''}`}
+          {err && <span className="red"> {err}</span>}
+        </span>
+        {isOwner && <Button variant="primary" size="sm" loading={busy} onClick={() => void subscribe()}>Assinar agora</Button>}
+      </div>
+    );
+  }
   if (c.accessDaysLeft === null || c.accessDaysLeft > 5) return null;
   const late = c.accessDaysLeft < 0;
   const cutIn = c.graceDays + c.accessDaysLeft;
@@ -91,6 +122,19 @@ export function AppLayout() {
     refetchInterval: 60_000,
   });
   const c = counters.data;
+  const qc = useQueryClient();
+  const toast = useToast();
+  // Volta do checkout da AbacatePay: avisa e atualiza o status (a confirmação chega pelo webhook).
+  useEffect(() => {
+    const p = new URLSearchParams(loc.search);
+    if (p.get('assinatura') !== 'ok') return;
+    toast.success('Pagamento recebido! Sua assinatura será confirmada em instantes.');
+    p.delete('assinatura');
+    nav({ pathname: loc.pathname, search: p.toString() }, { replace: true });
+    const t = setTimeout(() => void qc.invalidateQueries({ queryKey: ['counters'] }), 5000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loc.search]);
 
   return (
     <div className="app-shell">
@@ -161,7 +205,7 @@ export function AppLayout() {
           </Button>
         </header>
         <main id="conteudo" className="content" tabIndex={-1}>
-          {c && <PlanBanner c={c} />}
+          {c && <PlanBanner c={c} isOwner={isOwner} />}
           <ErrorBoundary resetKey={loc.pathname}><Outlet /></ErrorBoundary>
         </main>
         <Footer />

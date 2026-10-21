@@ -22,7 +22,7 @@ export function OrgPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['org', id], queryFn: () => api.get<OrgDetail>(`/api/platform/orgs/${id}`) });
-  const [link, setLink] = useState<{ link: string; hours?: number; kind: 'convite' | 'redefinição' } | null>(null);
+  const [link, setLink] = useState<{ link: string; hours?: number; kind: 'convite' | 'redefinição'; mailError?: string } | null>(null);
   const [adding, setAdding] = useState(false);
   const [suspend, setSuspend] = useState(false);
   const refresh = () => {
@@ -40,7 +40,7 @@ export function OrgPage() {
   const userAct = useMutation({
     mutationFn: ({ uid, action }: { uid: string; action: 'invite' | 'reset-link' }) => api.post<InviteResult>(`/api/platform/users/${uid}/${action}`),
     onSuccess: (r) => {
-      if (r.inviteLink) setLink({ link: r.inviteLink, hours: r.validHours, kind: 'convite' });
+      if (r.inviteLink) setLink({ link: r.inviteLink, hours: r.validHours, kind: 'convite', mailError: r.mailError });
       else if (r.resetLink) setLink({ link: r.resetLink, hours: r.validHours, kind: 'redefinição' });
       else toast.success('Convite enviado por e-mail.');
       refresh();
@@ -68,7 +68,7 @@ export function OrgPage() {
           </>
         }
       />
-      {link && <div className="card card-body"><SecretLink link={link.link} hours={link.hours} kind={link.kind} /></div>}
+      {link && <div className="card card-body"><SecretLink link={link.link} hours={link.hours} kind={link.kind} mailError={link.mailError} /></div>}
       {!o.isBillingOrg && <PlanCard o={o} onChanged={refresh} />}
       <div className="grid grid-main">
         <section className="card">

@@ -11,7 +11,7 @@ interface Signup {
 }
 interface Sales {
   enabled: boolean; available: boolean; mode: 'api' | 'link' | 'none'; checkoutUrl: string | null; keyHint: string | null; productId: string | null; planName: string; priceCents: number;
-  intervalMonths: number; methods: ('CARD' | 'PIX')[]; webhookUrl: string; webhookSecret: string | null; signups: Signup[];
+  intervalMonths: number; trialDays: number; methods: ('CARD' | 'PIX')[]; webhookUrl: string; webhookSecret: string | null; signups: Signup[];
 }
 
 const statusBadge: Record<Signup['status'], [string, string]> = {
@@ -28,10 +28,10 @@ export function SalesPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['platform-sales'], queryFn: () => api.get<Sales>('/api/platform/sales') });
-  const [f, setF] = useState({ apiKey: '', productId: '', planName: '', card: true, pix: false, checkoutUrl: '' });
+  const [f, setF] = useState({ apiKey: '', productId: '', planName: '', card: true, pix: false, checkoutUrl: '', trialDays: '7' });
   const [errors, setErrors] = useState<Record<string, string>>({});
   useEffect(() => {
-    if (q.data) setF((x) => ({ ...x, checkoutUrl: q.data.checkoutUrl ?? '', productId: q.data.productId ?? '', planName: q.data.planName, card: q.data.methods.includes('CARD'), pix: q.data.methods.includes('PIX') }));
+    if (q.data) setF((x) => ({ ...x, checkoutUrl: q.data.checkoutUrl ?? '', productId: q.data.productId ?? '', planName: q.data.planName, trialDays: String(q.data.trialDays ?? 7), card: q.data.methods.includes('CARD'), pix: q.data.methods.includes('PIX') }));
   }, [q.data]);
   const save = useMutation({
     mutationFn: (v: { enabled: boolean; regenerateWebhookSecret?: boolean }) =>
@@ -40,6 +40,7 @@ export function SalesPage() {
         ...(f.apiKey ? { apiKey: f.apiKey } : {}),
         productId: f.productId,
         planName: f.planName,
+        trialDays: Number(f.trialDays) || 0,
         methods: [...(f.card ? ['CARD'] : []), ...(f.pix ? ['PIX'] : [])],
         checkoutUrl: f.checkoutUrl.trim() || null,
         ...(v.regenerateWebhookSecret ? { regenerateWebhookSecret: true } : {}),
@@ -103,6 +104,8 @@ export function SalesPage() {
           <TextField label="ID do produto (assinatura)" value={f.productId} onChange={(e) => setF({ ...f, productId: e.target.value })} error={errors.productId}
             hint="Produto com ciclo mensal criado na AbacatePay. O preço vem dele." />
           <TextField label="Nome do plano" value={f.planName} onChange={(e) => setF({ ...f, planName: e.target.value })} error={errors.planName} maxLength={80} />
+          <TextField label="Dias de teste grátis (Criar conta)" type="number" min={0} max={30} value={f.trialDays} onChange={(e) => setF({ ...f, trialDays: e.target.value })} error={errors.trialDays}
+            hint="Quem cria a conta pelo site usa grátis por esses dias e depois assina dentro do sistema. 0 = sem teste." />
         </div>
         <div className="row">
           <Switch checked={f.card} onChange={(e) => setF({ ...f, card: e.target.checked })} label="Cartão de crédito (renova sozinho)" />

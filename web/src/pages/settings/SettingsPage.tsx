@@ -640,12 +640,12 @@ function TeamTab() {
   const { user } = useAuth();
   const q = useQuery({ queryKey: ['team'], queryFn: () => api.get<{ items: TeamUser[]; mailMode: string }>('/api/team') });
   const [inviting, setInviting] = useState(false);
-  const [link, setLink] = useState<{ link: string; hours?: number; kind: 'convite' | 'redefinição' } | null>(null);
+  const [link, setLink] = useState<{ link: string; hours?: number; kind: 'convite' | 'redefinição'; mailError?: string } | null>(null);
   const [toggle, setToggle] = useState<TeamUser | null>(null);
   const act = useMutation({
     mutationFn: ({ u, action }: { u: TeamUser; action: 'invite' | 'reset-link' }) => api.post<InviteResult>(`/api/team/${u.id}/${action}`),
     onSuccess: (r) => {
-      if (r.inviteLink) setLink({ link: r.inviteLink, hours: r.validHours, kind: 'convite' });
+      if (r.inviteLink) setLink({ link: r.inviteLink, hours: r.validHours, kind: 'convite', mailError: r.mailError });
       else if (r.resetLink) setLink({ link: r.resetLink, hours: r.validHours, kind: 'redefinição' });
       else toast.success('Convite enviado por e-mail.');
       void qc.invalidateQueries({ queryKey: ['team'] });
@@ -670,7 +670,7 @@ function TeamTab() {
         <p className="muted small" style={{ margin: 0 }}><strong>Responsável</strong>: acesso total. <strong>Equipe</strong>: clientes, cobranças, mensagens e atendimento.</p>
         <Button variant="primary" onClick={() => setInviting(true)}><Icon name="plus" /> Convidar pessoa</Button>
       </div>
-      {link && <div className="card card-body"><SecretLink link={link.link} hours={link.hours} kind={link.kind} /></div>}
+      {link && <div className="card card-body"><SecretLink link={link.link} hours={link.hours} kind={link.kind} mailError={link.mailError} /></div>}
       <div className="card">
         {!q.data?.items.length ? <Empty title="Sem usuários" /> : (
           <div className="table-wrap">
@@ -726,7 +726,7 @@ function TeamTab() {
   );
 }
 
-function InviteModal({ onClose, onLink }: { onClose: () => void; onLink: (l: { link: string; hours?: number; kind: 'convite' }) => void }) {
+function InviteModal({ onClose, onLink }: { onClose: () => void; onLink: (l: { link: string; hours?: number; kind: 'convite'; mailError?: string }) => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [fullName, setFullName] = useState('');
@@ -738,7 +738,7 @@ function InviteModal({ onClose, onLink }: { onClose: () => void; onLink: (l: { l
     mutationFn: () => api.post<InviteResult>('/api/team', { fullName, email, role }),
     onSuccess: (r) => {
       void qc.invalidateQueries({ queryKey: ['team'] });
-      if (r.inviteLink) onLink({ link: r.inviteLink, hours: r.validHours, kind: 'convite' });
+      if (r.inviteLink) onLink({ link: r.inviteLink, hours: r.validHours, kind: 'convite', mailError: r.mailError });
       else toast.success('Convite enviado por e-mail.');
       onClose();
     },

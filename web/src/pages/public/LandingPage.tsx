@@ -27,7 +27,7 @@ const STEPS = [
 ];
 
 export interface PublicPlan {
-  available: boolean; mode: 'api' | 'link' | 'none'; checkoutUrl: string | null; planName: string; priceCents: number; intervalMonths: number; methods: string[];
+  available: boolean; mode: 'api' | 'link' | 'none'; checkoutUrl: string | null; planName: string; priceCents: number; intervalMonths: number; methods: string[]; trialDays?: number;
 }
 
 /** Botão de assinatura: cadastro no site (API) ou link fixo de checkout da AbacatePay. */
@@ -88,9 +88,9 @@ export function LandingPage() {
             </p>
             <div className="row">
               {plan?.available ? (
-                <SubscribeLink plan={plan} className="btn btn-primary btn-lg">
-                  Assinar por {price} <Icon name="arrowRight" />
-                </SubscribeLink>
+                <Link to="/criar-conta" className="btn btn-primary btn-lg">
+                  {plan.trialDays ? `Criar conta grátis · ${plan.trialDays} dias` : `Criar conta · ${price}`} <Icon name="arrowRight" />
+                </Link>
               ) : (
                 <a href="#comecar" className="btn btn-primary btn-lg">
                   Quero usar o Venceu <Icon name="arrowRight" />
@@ -187,11 +187,11 @@ export function LandingPage() {
               </ul>
               {plan?.available ? (
                 <>
-                  <SubscribeLink plan={plan} className="btn btn-primary btn-lg" style={{ width: '100%', justifyContent: 'center' }}>
-                    Assinar agora <Icon name="arrowRight" />
-                  </SubscribeLink>
+                  <Link to="/criar-conta" className="btn btn-primary btn-lg" style={{ width: '100%', justifyContent: 'center' }}>
+                    {plan.trialDays ? `Começar teste grátis de ${plan.trialDays} dias` : 'Criar conta'} <Icon name="arrowRight" />
+                  </Link>
                   <p className="tiny muted" style={{ margin: '10px 0 0', textAlign: 'center' }}>
-                    Pagamento seguro pela AbacatePay{plan.mode === 'api' ? (plan.methods.includes('PIX') ? ' · cartão ou PIX' : ' · cartão de crédito') : ''}. {plan.mode === 'api' ? ' Seu acesso é liberado na hora.' : ' Você recebe o acesso logo após o pagamento.'}
+                    Pagamento seguro pela AbacatePay{plan.mode === 'api' ? (plan.methods.includes('PIX') ? ' · cartão ou PIX' : ' · cartão de crédito') : ''}. {plan.mode === 'api' ? ' Seu acesso é liberado na hora.' : ' Você recebe o acesso logo após o pagamento.'}{' '}Já tem conta? <Link to="/entrar">Entrar</Link>
                   </p>
                 </>
               ) : (

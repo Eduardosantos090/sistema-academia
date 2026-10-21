@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Deps } from '../../lib/context.js';
 import { asUser, requireOrg } from '../../lib/context.js';
+import { loadSaleConfig, saleMode } from '../sales/service.js';
 
 export function registerDashboardRoutes(app: FastifyInstance, deps: Deps) {
   /** Contadores leves para os avisos do menu. */
@@ -12,11 +13,14 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: Deps) {
                 (select count(*)::int from messages where status = 'manual') as "manualQueue",
                 (select count(*)::int from charges where status = 'aberta' and reported_paid_at is not null) as "toConfirm",
                 o.plan_name as "planName", to_char(o.access_until, 'YYYY-MM-DD') as "accessUntil",
-                (o.access_until - app.org_today(o.id)) as "accessDaysLeft", o.grace_days as "graceDays", o.auto_suspend as "autoSuspend"
+                (o.access_until - app.org_today(o.id)) as "accessDaysLeft", o.grace_days as "graceDays", o.auto_suspend as "autoSuspend",
+                o.subscription_status as "subscriptionStatus"
            from organizations o where o.id = $1`,
         [requireOrg(req).orgId],
       );
-      return rows[0];
+      // Pode assinar pelo sistema (venda online ligada) e ainda não tem assinatura ativa.
+      const canSubscribe = saleMode(await loadSaleConfig(deps)) !== 'none' && rows[0]?.subscriptionStatus !== 'ativa';
+      return { ...rows[0], canSubscribe };
     });
   });
 

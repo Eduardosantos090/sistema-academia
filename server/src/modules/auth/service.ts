@@ -78,11 +78,12 @@ export async function login(
     role: OrgRole | null;
     is_platform_admin: boolean;
     active: boolean;
+    suspended_reason: string | null;
     password_hash: string | null;
     locked_until: Date | null;
   }>(
     `select u.id, u.email, u.full_name, u.organization_id, o.name as org_name, u.role, u.is_platform_admin,
-            ${ACTIVE} as active, cr.password_hash, cr.locked_until
+            ${ACTIVE} as active, o.suspended_reason, cr.password_hash, cr.locked_until
        from users u
        left join organizations o on o.id = u.organization_id
        left join user_credentials cr on cr.user_id = u.id
@@ -113,6 +114,10 @@ export async function login(
 
   if (!u.active) {
     await auditOwner(deps, u.id, 'auth.login_blocked_inactive', meta.ip);
+    // Plano vencido: o responsável pode assinar para reativar (sem depender do suporte).
+    if (u.suspended_reason === 'inadimplencia' && u.role === 'owner') {
+      throw new AppError(402, 'plan_expired', 'Seu período de acesso terminou. Assine para reativar sua conta.');
+    }
     throw new AppError(403, 'inactive', 'Seu acesso está desativado. Procure o responsável pela sua conta.');
   }
 
@@ -292,6 +297,9 @@ export async function requestPasswordReset(deps: Deps, email: string, ip: string
       `Olá, ${target.full_name}.\n\nRecebemos um pedido para redefinir sua senha. ` +
       `Use o link abaixo em até ${RESET_TTL_MINUTES} minutos (uso único):\n\n${link}\n\n` +
       'Se você não fez este pedido, ignore esta mensagem; sua senha continua a mesma.',
+  }).catch((e) => {
+    console.warn('redefinição: falha no envio do e-mail', (e as { code?: string }).code ?? 'erro');
+    throw new AppError(503, 'mail_unavailable', 'Não foi possível enviar o e-mail agora. Tente mais tarde ou fale com o suporte.');
   });
 }
 

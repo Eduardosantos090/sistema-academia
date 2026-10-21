@@ -261,6 +261,53 @@ describe('venda da assinatura do Venceu', () => {
     await configure();
   });
 
+  it('criar conta: entra na hora em teste grátis, assina por dentro; plano vencido reativa pelo login', async () => {
+    const s = await configure();
+    await platform.put('/api/platform/sales', { enabled: true, productId: PRODUCT, planName: 'Venceu Mensal', methods: ['CARD', 'PIX'], trialDays: 5 });
+    const anon = new Agent(ctx);
+    expect(json(await anon.get('/api/public/plan')).trialDays).toBe(5);
+    const email = `teste-${++seq}@example.test`;
+    expect((await anon.post('/api/public/register', { ...form(email), website: 'http://spam' })).statusCode).toBe(400);
+    expect((await anon.post('/api/public/register', { ...form(email), consent: false })).statusCode).toBe(422);
+    const reg = await anon.post('/api/public/register', form(email));
+    expect(reg.statusCode).toBe(201);
+    anon.csrf = reg.json().csrfToken;
+    // Já está logado, sem verificar e-mail.
+    expect((await anon.get('/api/dashboard')).statusCode).toBe(200);
+    const c = json(await anon.get('/api/counters'));
+    expect(c).toMatchObject({ canSubscribe: true, accessDaysLeft: 5 });
+    expect((await new Agent(ctx).post('/api/public/register', form(email))).statusCode).toBe(409);
+
+    // Assinar por dentro: abre o checkout e, pago, a mesma conta vira assinante.
+    const sub = json(await anon.post('/api/billing/subscribe'));
+    expect(sub.url).toMatch(/\/pay\/bill_/);
+    expect(json(await anon.post('/api/billing/subscribe')).url).toBe(sub.url); // reaproveita o checkout pendente
+    const subId = abacate.pay(sub.url.split('/').pop());
+    const hook = `/api/webhooks/abacatepay-venceu?webhookSecret=${s.webhookSecret}`;
+    expect((await new Agent(ctx).post(hook, { id: `log_${++seq}`, event: 'subscription.completed', data: { subscription: { id: subId } } })).statusCode).toBe(200);
+    const orgId = (await ctx.owner.query('select organization_id from users where email = $1', [email])).rows[0].organization_id;
+    const org = (await ctx.owner.query(`select subscription_status, abacate_subscription_id, access_until - (now() at time zone 'America/Sao_Paulo')::date as days,
+      (select count(*)::int from organizations o2 join users u on u.organization_id = o2.id where u.email = $2) as orgs from organizations where id = $1`, [orgId, email])).rows[0];
+    expect(org).toMatchObject({ subscription_status: 'ativa', abacate_subscription_id: subId, orgs: 1 });
+    expect(org.days).toBeGreaterThanOrEqual(33);
+    expect(json(await anon.get('/api/counters')).canSubscribe).toBe(false);
+
+    // Venceu sem pagar: login avisa e leva ao pagamento; pago (rotina confere), volta a entrar.
+    await ctx.owner.query(`update organizations set access_until = current_date - 10, subscription_status = 'cancelada' where id = $1`, [orgId]);
+    await runMaintenance(ctx.deps, 3000);
+    const denied = await new Agent(ctx).post('/api/auth/login', { email, password: 'SenhaForte#2026' });
+    expect(denied.statusCode).toBe(402);
+    expect(denied.json().error.code).toBe('plan_expired');
+    expect((await new Agent(ctx).post('/api/public/reactivate', { email, password: 'errada-123456' })).statusCode).toBe(401);
+    const re = json(await new Agent(ctx).post('/api/public/reactivate', { email, password: 'SenhaForte#2026' }));
+    expect(re.url).toMatch(/\/pay\/bill_/);
+    abacate.pay(re.url.split('/').pop());
+    await pollSignups(ctx.deps);
+    expect((await ctx.owner.query('select is_active, suspended_reason, subscription_status from organizations where id = $1', [orgId])).rows[0])
+      .toMatchObject({ is_active: true, suspended_reason: null, subscription_status: 'ativa' });
+    await new Agent(ctx).login(email, 'SenhaForte#2026');
+  });
+
   it('acesso vence sem renovação: a rotina suspende a conta vendida', async () => {
     await configure();
     const anon = new Agent(ctx);

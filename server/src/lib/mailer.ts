@@ -127,3 +127,13 @@ export class OrgSmtpMailer implements Mailer {
 }
 
 export const createOrgMailer: OrgMailerFactory = (smtp) => new OrgSmtpMailer(smtp);
+
+/** Motivo legível de uma falha de envio (sem senhas nem detalhes internos). */
+export function mailErrorReason(e: unknown): string {
+  const err = e as { code?: string; responseCode?: number; message?: string };
+  if (err?.code === 'EAUTH') return 'o servidor de e-mail recusou o usuário ou a senha (confira SMTP_USER e a senha de app do Gmail)';
+  if (['ECONNECTION', 'ETIMEDOUT', 'ESOCKET', 'EDNS', 'ECONNREFUSED'].includes(err?.code ?? '')) return 'não foi possível conectar ao servidor de e-mail';
+  if (err?.code === 'EENVELOPE') return 'endereço de e-mail do destinatário inválido';
+  if (err?.responseCode) return `o servidor de e-mail recusou o envio (código ${err.responseCode})`;
+  return 'falha no envio do e-mail';
+}

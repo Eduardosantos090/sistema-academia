@@ -28,6 +28,8 @@ export interface SaleConfig {
   /** Link de checkout fixo criado no painel da AbacatePay (opcional). */
   checkoutUrl: string | null;
   linkCheckedAt: Date | null;
+  /** Dias de teste grátis no cadastro direto ("Criar conta"). */
+  trialDays: number;
 }
 
 export async function loadSaleConfig(deps: Deps): Promise<SaleConfig> {
@@ -45,6 +47,7 @@ export async function loadSaleConfig(deps: Deps): Promise<SaleConfig> {
     methods: r?.sale_methods ?? ['CARD'],
     checkoutUrl: r?.sale_checkout_url ?? null,
     linkCheckedAt: r?.sale_link_checked_at ?? null,
+    trialDays: r?.sale_trial_days ?? 7,
   };
 }
 
@@ -126,6 +129,16 @@ export async function provisionSignup(deps: Deps, signupId: string, sub: Abacate
     const s = rows[0];
     if (!s || s.status === 'ativo') return s?.organization_id ?? null;
     if (s.checkout_id && sub.checkoutId && s.checkout_id !== sub.checkoutId) return null;
+    // Conta já existente (cadastro com teste grátis ou plano vencido): só ativa a assinatura.
+    if (s.organization_id) {
+      await activateOrg(db, s.organization_id, sub, cfg);
+      await db.query(`update signups set status = 'ativo', subscription_id = $2, activated_at = now(), password_hash = null, error = null where id = $1`, [s.id, sub.id]);
+      await db.query(
+        `insert into audit_events (organization_id, action, entity_type, entity_id, details) values ($1::uuid, 'sale.subscription_activated', 'organization', $1::text, $2)`,
+        [s.organization_id, JSON.stringify({ subscription: sub.id, method: sub.method, devMode: sub.devMode })],
+      );
+      return s.organization_id as string;
+    }
     const taken = await db.query('select 1 from users where email = $1', [s.email]);
     if (taken.rowCount) {
       await db.query(`update signups set error = 'E-mail já usado por outra conta: fale com o suporte.', subscription_id = $2 where id = $1`, [s.id, sub.id]);
@@ -177,6 +190,23 @@ export async function provisionFromLink(deps: Deps, apiKey: string, sub: Abacate
   const business = name.length >= 2 ? name : 'Nova empresa';
   const phone = cust.cellphone ? normalizeBrPhone(cust.cellphone) : null;
   const doc = cust.taxId && /^\d{11}$|^\d{14}$/.test(cust.taxId.replace(/\D/g, '')) ? cust.taxId.replace(/\D/g, '') : null;
+  // Quem já tem conta (ex.: em teste grátis) e paga pelo link: ativa a conta existente.
+  if (email) {
+    const owner = await deps.pools.owner.query<{ organization_id: string }>(
+      `select organization_id from users where email = $1 and role = 'owner' and organization_id is not null limit 1`,
+      [email],
+    );
+    if (owner.rows[0]) {
+      const ins = await deps.pools.owner.query<{ id: string }>(
+        `insert into signups (owner_name, business_name, email, source, abacate_customer_id, subscription_id, organization_id)
+         select u.full_name, o.name, u.email, 'link', $2, $3, o.id from users u join organizations o on o.id = u.organization_id
+          where u.email = $1 and u.role = 'owner' limit 1
+         on conflict (subscription_id) do nothing returning id`,
+        [email, sub.customerId, sub.id],
+      );
+      return ins.rows[0] ? provisionSignup(deps, ins.rows[0].id, sub) : null;
+    }
+  }
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     await deps.pools.owner.query(
       `insert into signups (owner_name, business_name, email, status, source, subscription_id, abacate_customer_id, checkout_id, error)
@@ -329,4 +359,112 @@ export async function pollSignups(deps: Deps, limit = 10) {
     }
   }
   return { checked: rows.length, activated };
+}
+
+/** Ativa (ou reativa) a assinatura de uma organização existente. */
+async function activateOrg(db: { query: (q: string, p?: unknown[]) => Promise<unknown> }, orgId: string, sub: AbacateSubscription, cfg: SaleConfig) {
+  await db.query(
+    `update organizations o set
+        plan_name = $3, plan_amount_cents = $4, plan_interval_months = $5::smallint,
+        access_until = (greatest(coalesce(o.access_until, t.today), t.today) + make_interval(months => $5::int))::date,
+        auto_suspend = true, grace_days = 3, is_active = true, suspended_reason = null,
+        abacate_subscription_id = $2, subscription_status = 'ativa'
+       from (select (now() at time zone 'America/Sao_Paulo')::date as today) t
+      where o.id = $1`,
+    [orgId, sub.id, cfg.planName, Number.isFinite(sub.amount) && sub.amount > 0 ? sub.amount : cfg.priceCents, cfg.intervalMonths],
+  );
+}
+
+export interface RegisterInput {
+  ownerName: string;
+  businessName: string;
+  segment: string;
+  email: string;
+  phone: string | null;
+  password: string;
+}
+
+/**
+ * "Criar conta": cria a empresa e o acesso do responsável na hora, sem
+ * verificação de e-mail, com o período de teste configurado pela plataforma.
+ */
+export async function registerTrial(deps: Deps, input: RegisterInput) {
+  const cfg = await loadSaleConfig(deps);
+  if (saleMode(cfg) === 'none') throw new AppError(409, 'conflict', 'O cadastro online está indisponível no momento. Fale com a gente pelo formulário.');
+  const exists = await deps.pools.owner.query('select 1 from users where email = $1', [input.email]);
+  if (exists.rowCount) throw conflict('Este e-mail já tem uma conta no Venceu. Entre com ele ou use "Esqueci minha senha".');
+  const passwordHash = await hashPassword(input.password);
+  const slug = await uniqueSlug(deps, slugify(input.businessName));
+  return withTx(deps.pools.owner, async (db) => {
+    const org = await db.query<{ id: string }>(
+      `insert into organizations (name, slug, segment, contact_email, contact_phone, plan_name, plan_amount_cents, plan_interval_months,
+                                  access_until, auto_suspend, grace_days)
+       values ($1, $2, $3, $4, $5, $6, $7, $8::smallint, ((now() at time zone 'America/Sao_Paulo')::date + $9::int), true, 0)
+       returning id`,
+      [input.businessName, slug, input.segment, input.email, input.phone, cfg.planName, cfg.priceCents, cfg.intervalMonths, cfg.trialDays],
+    );
+    const orgId = org.rows[0]!.id;
+    await db.query('select app.seed_org_defaults($1)', [orgId]);
+    const u = await db.query<{ id: string }>(
+      `insert into users (email, full_name, organization_id, role) values ($1, $2, $3, 'owner') returning id`,
+      [input.email, input.ownerName, orgId],
+    );
+    await db.query('insert into user_credentials (user_id, password_hash) values ($1, $2)', [u.rows[0]!.id, passwordHash]);
+    await db.query(
+      `insert into audit_events (organization_id, actor_id, action, entity_type, entity_id, details) values ($1::uuid, $2, 'sale.trial_started', 'organization', $1::text, $3)`,
+      [orgId, u.rows[0]!.id, JSON.stringify({ trialDays: cfg.trialDays })],
+    );
+    return { orgId, userId: u.rows[0]!.id };
+  });
+}
+
+/**
+ * Pagamento da assinatura de uma organização existente: checkout da AbacatePay
+ * (venda pela API) ou o link fixo. Devolve a URL para onde levar a pessoa.
+ */
+export async function createOrgCheckout(deps: Deps, orgId: string) {
+  const cfg = await loadSaleConfig(deps);
+  const mode = saleMode(cfg);
+  if (mode === 'none') throw new AppError(409, 'conflict', 'A assinatura online está indisponível no momento. Fale com o suporte do Venceu.');
+  if (mode === 'link') return { url: cfg.checkoutUrl! };
+  const { rows } = await deps.pools.owner.query<{ owner_name: string; email: string; phone: string | null; document: string | null; name: string; subscription_status: string | null }>(
+    `select u.full_name as owner_name, u.email, o.contact_phone as phone, o.document, o.name, o.subscription_status
+       from organizations o join users u on u.organization_id = o.id and u.role = 'owner'
+      where o.id = $1 order by u.created_at limit 1`,
+    [orgId],
+  );
+  const o = rows[0];
+  if (!o) throw new AppError(404, 'not_found', 'Empresa não encontrada.');
+  if (o.subscription_status === 'ativa') throw conflict('A assinatura desta empresa já está ativa.');
+  // Reaproveita um checkout recente ainda não pago.
+  const recent = await deps.pools.owner.query<{ checkout_url: string }>(
+    `select checkout_url from signups where organization_id = $1 and status = 'pendente' and checkout_url is not null
+       and created_at > now() - interval '12 hours' order by created_at desc limit 1`,
+    [orgId],
+  );
+  if (recent.rows[0]) return { url: recent.rows[0].checkout_url };
+  const ins = await deps.pools.owner.query<{ id: string }>(
+    `insert into signups (owner_name, business_name, email, phone, document, organization_id) values ($1, $2, $3, $4, $5, $6) returning id`,
+    [o.owner_name, o.name, o.email, o.phone, o.document, orgId],
+  );
+  const signupId = ins.rows[0]!.id;
+  try {
+    const customer = await createCustomer(deps, cfg.apiKey!, { email: o.email, name: o.owner_name, cellphone: o.phone, taxId: o.document });
+    const checkout = await createSubscriptionCheckout(deps, cfg.apiKey!, {
+      productId: cfg.productId!,
+      customerId: customer.id,
+      externalId: signupId,
+      completionUrl: `${deps.config.appUrl}/app?assinatura=ok`,
+      returnUrl: `${deps.config.appUrl}/app`,
+      methods: cfg.methods,
+    });
+    await deps.pools.owner.query('update signups set abacate_customer_id = $2, checkout_id = $3, checkout_url = $4 where id = $1', [
+      signupId, customer.id, checkout.id, checkout.url,
+    ]);
+    return { url: checkout.url };
+  } catch (e) {
+    const msg = e instanceof OutboundError ? e.message : 'Falha ao criar o pagamento.';
+    await deps.pools.owner.query(`update signups set status = 'expirado', error = $2 where id = $1`, [signupId, msg.slice(0, 300)]);
+    throw new AppError(502, 'provider', 'Não foi possível abrir o pagamento agora. Tente novamente em alguns minutos.');
+  }
 }

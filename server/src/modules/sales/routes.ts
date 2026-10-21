@@ -7,10 +7,15 @@ import { parse } from '../../lib/validate.js';
 import { newToken, safeEqual } from '../../lib/crypto.js';
 import { encryptSecret } from '../../lib/secrets.js';
 import { OutboundError } from '../../lib/http.js';
+import { mailErrorReason } from '../../lib/mailer.js';
 import { zEmail, zOptionalDocument, zOptionalPhone, zPassword, zText } from '../../lib/normalize.js';
 import { SEGMENTS } from '../platform/routes.js';
 import { createSubscriptionProduct, getProduct, getStore, signatureOk, zAbacateKeyRe } from '../payments/abacatepay.js';
-import { checkSignup, handleSubscriptionEvent, loadSaleConfig, saleAvailable, saleMode, startSignup } from './service.js';
+import { checkSignup, createOrgCheckout, handleSubscriptionEvent, loadSaleConfig, registerTrial, saleAvailable, saleMode, startSignup } from './service.js';
+import { login } from '../auth/service.js';
+import { publicUser, setSessionCookie } from '../auth/routes.js';
+import { requireOwner } from '../../lib/context.js';
+import { verifyPassword } from '../../lib/crypto.js';
 
 const CYCLE_MONTHS: Record<string, number> = { MONTHLY: 1, QUARTERLY: 3, SEMIANNUALLY: 6, ANNUALLY: 12, YEARLY: 12 };
 const zToken = z.object({ token: z.string().regex(/^[0-9a-f]{64}$/) });
@@ -31,11 +36,64 @@ export function registerSalesRoutes(app: FastifyInstance, deps: Deps) {
       available: mode !== 'none',
       mode,
       checkoutUrl: mode === 'link' ? c.checkoutUrl : null,
+      trialDays: c.trialDays,
       planName: c.planName,
       priceCents: c.priceCents,
       intervalMonths: c.intervalMonths,
       methods: c.methods,
     };
+  });
+
+  /** "Criar conta": cadastro com teste grátis; já entra no sistema (sem verificação de e-mail). */
+  app.post('/api/public/register', { config: { public: true } }, async (req, reply) => {
+    const body = parse(
+      z
+        .object({
+          ownerName: zText(2, 120),
+          businessName: zText(2, 120),
+          segment: z.enum(SEGMENTS).default('outro'),
+          email: zEmail,
+          phone: zOptionalPhone.pipe(z.string({ message: 'Informe o WhatsApp.' })),
+          password: zPassword,
+          consent: z.literal(true, { message: 'É preciso aceitar os termos para continuar.' }),
+          website: z.string().max(200).optional(),
+        })
+        .strict(),
+      req.body,
+    );
+    await deps.limiters.accessRequestIp.consume(`register:${req.ip}`);
+    if (body.website) throw new AppError(400, 'bad_request', 'Não foi possível concluir.');
+    await registerTrial(deps, body);
+    const { token, user } = await login(deps, body.email, body.password, { ip: req.ip, userAgent: req.headers['user-agent'] });
+    setSessionCookie(deps, reply, token);
+    reply.code(201);
+    return { user: publicUser(user), csrfToken: user.csrfToken };
+  });
+
+  /** Plano vencido (login bloqueado): o responsável confirma e-mail e senha e vai para o pagamento. */
+  app.post('/api/public/reactivate', { config: { public: true } }, async (req) => {
+    const body = parse(z.object({ email: zEmail, password: z.string().min(1).max(200) }).strict(), req.body);
+    await deps.limiters.loginIp.consume(`ip:${req.ip}`);
+    await deps.limiters.loginAccount.consume(`acc:${body.email}`);
+    const { rows } = await deps.pools.owner.query<{ organization_id: string; password_hash: string | null; suspended_reason: string | null; is_active: boolean }>(
+      `select u.organization_id, cr.password_hash, o.suspended_reason, o.is_active
+         from users u join organizations o on o.id = u.organization_id left join user_credentials cr on cr.user_id = u.id
+        where u.email = $1 and u.role = 'owner' and u.is_active`,
+      [body.email],
+    );
+    const r = rows[0];
+    const ok = r?.password_hash ? await verifyPassword(body.password, r.password_hash) : false;
+    if (!r || !ok) throw new AppError(401, 'invalid_credentials', 'E-mail ou senha incorretos.');
+    if (r.is_active || r.suspended_reason !== 'inadimplencia') throw new AppError(409, 'conflict', 'Sua conta está ativa: entre normalmente.');
+    await deps.limiters.loginAccount.reset(`acc:${body.email}`);
+    return createOrgCheckout(deps, r.organization_id);
+  });
+
+  /** Assinar de dentro do sistema (teste grátis ou plano perto de vencer). */
+  app.post('/api/billing/subscribe', async (req) => {
+    const me = requireOwner(req);
+    await deps.limiters.sendNow.consume(`u:${me.id}`);
+    return createOrgCheckout(deps, me.orgId);
   });
 
   /** Cadastro + checkout de assinatura: devolve a URL de pagamento da AbacatePay. */
@@ -111,6 +169,22 @@ export function registerSalesRoutes(app: FastifyInstance, deps: Deps) {
 
   // ------------------------------------------------------------ plataforma
 
+  /** Envia um e-mail de teste pelo remetente da plataforma e mostra o motivo exato se falhar. */
+  app.post('/api/platform/mail-test', async (req) => {
+    const me = requirePlatform(req);
+    const body = parse(z.object({ to: zEmail }).strict(), req.body);
+    await deps.limiters.sendNow.consume(`u:${me.id}`);
+    if (deps.config.mailMode === 'manual') {
+      throw new AppError(409, 'conflict', 'E-mail do sistema não configurado: preencha SMTP_USER e SMTP_PASSWORD no Netlify e faça um novo deploy.');
+    }
+    try {
+      await deps.mailer.send({ to: body.to, subject: 'Teste de e-mail — Venceu', text: 'Se você recebeu esta mensagem, o e-mail do sistema Venceu está funcionando.' });
+    } catch (e) {
+      throw new AppError(502, 'mail_failed', `Falha: ${mailErrorReason(e)}.`);
+    }
+    return { ok: true, from: deps.config.mailFrom };
+  });
+
   app.get('/api/platform/sales', async (req) => {
     requirePlatform(req);
     const c = await loadSaleConfig(deps);
@@ -130,6 +204,7 @@ export function registerSalesRoutes(app: FastifyInstance, deps: Deps) {
       priceCents: c.priceCents,
       intervalMonths: c.intervalMonths,
       methods: c.methods,
+      trialDays: c.trialDays,
       webhookUrl: `${deps.config.appUrl}/api/webhooks/abacatepay-venceu`,
       webhookSecret: c.webhookSecret,
       signups: rows,
@@ -197,6 +272,7 @@ export function registerSalesRoutes(app: FastifyInstance, deps: Deps) {
             .nullable()
             .optional(),
           regenerateWebhookSecret: z.boolean().optional(),
+          trialDays: z.coerce.number().int().min(0).max(30).optional(),
         })
         .strict(),
       req.body,
@@ -241,10 +317,11 @@ export function registerSalesRoutes(app: FastifyInstance, deps: Deps) {
     await deps.pools.owner.query(
       `update platform_settings set abacate_api_key_enc = $1, abacate_webhook_secret_enc = $2, sale_enabled = $3, sale_product_id = $4,
               sale_plan_name = $5, sale_price_cents = $6, sale_interval_months = $7, sale_methods = $8,
-              sale_checkout_url = case when $9::boolean then $10 else sale_checkout_url end, updated_at = now()
+              sale_checkout_url = case when $9::boolean then $10 else sale_checkout_url end,
+              sale_trial_days = coalesce($11::smallint, sale_trial_days), updated_at = now()
         where id = 1`,
       [apiKey ? encryptSecret(key, apiKey) : null, encryptSecret(key, secret), body.enabled && !!apiKey, body.productId, body.planName,
-        priceCents, intervalMonths, body.methods, body.checkoutUrl !== undefined, body.checkoutUrl ?? null],
+        priceCents, intervalMonths, body.methods, body.checkoutUrl !== undefined, body.checkoutUrl ?? null, body.trialDays ?? null],
     );
     await deps.pools.owner.query(
       `insert into audit_events (actor_id, action, entity_type, details, ip) values ($1, 'platform.sales_settings', 'platform', $2, $3)`,

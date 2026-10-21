@@ -69,7 +69,7 @@ export function OrgsPage() {
           <Link to="/app/plataforma/pedidos" className="card stat warning" style={{ textDecoration: 'none', color: 'inherit' }}><div className="stat-icon"><Icon name="inbox" /></div><div className="label">Pedidos de acesso</div><div className="value">{ov.data.pendingRequests}</div><div className="meta">aguardando análise</div></Link>
         </div>
       )}
-      {created?.inviteLink && <div className="card card-body"><SecretLink link={created.inviteLink} hours={created.validHours} /></div>}
+      {created?.inviteLink && <div className="card card-body"><SecretLink link={created.inviteLink} hours={created.validHours} mailError={created.mailError} /></div>}
       {created?.inviteSent && <Alert kind="success">Organização criada e convite enviado por e-mail ao responsável.</Alert>}
       <section className="card card-body row" style={{ alignItems: 'flex-end' }}>
         <div style={{ flex: 1, minWidth: 260 }}>
@@ -116,6 +116,7 @@ export function OrgsPage() {
         )}
       </div>
       {creating && <NewOrgModal onClose={() => setCreating(false)} onCreated={setCreated} />}
+      <MailTestCard />
     </div>
   );
 }
@@ -160,5 +161,28 @@ function NewOrgModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
         <p className="muted small" style={{ margin: 0 }}>A organização já nasce com modelos de mensagem, regras de lembrete (D-3, D, D+3, D+10) e o assistente configurado.</p>
       </div>
     </Modal>
+  );
+}
+
+/** Teste do e-mail do sistema (convites e recuperação de senha). */
+function MailTestCard() {
+  const toast = useToast();
+  const [to, setTo] = useState('');
+  const m = useMutation({
+    mutationFn: () => api.post<{ from: string }>('/api/platform/mail-test', { to }),
+    onSuccess: (r) => toast.success(`E-mail de teste enviado por ${r.from}. Confira a caixa de entrada (e o spam).`),
+    onError: (e) => toast.error(e),
+  });
+  return (
+    <section className="card card-body stack" style={{ maxWidth: 820 }}>
+      <h2 style={{ margin: 0 }}>E-mail do sistema</h2>
+      <p className="muted small" style={{ margin: 0 }}>Usado nos convites e no “Esqueci minha senha”. Se falhar, aparece o motivo exato.</p>
+      <div className="row" style={{ alignItems: 'flex-end' }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <TextField label="Enviar e-mail de teste para" type="email" value={to} onChange={(e) => setTo(e.target.value)} placeholder="voce@exemplo.com" />
+        </div>
+        <Button loading={m.isPending} disabled={!to} onClick={() => m.mutate()}>Testar e-mail</Button>
+      </div>
+    </section>
   );
 }

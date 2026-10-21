@@ -8,6 +8,7 @@ import { UnsubscribePage } from './pages/public/UnsubscribePage';
 import { PayPage } from './pages/public/PayPage';
 import { SignupDonePage, SignupPage } from './pages/public/SignupPage';
 import { PrivacyPage, TermsPage } from './pages/public/LegalPage';
+import { CreateAccountPage } from './pages/public/CreateAccountPage';
 import { LoginPage } from './pages/auth/LoginPage';
 import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/auth/ResetPasswordPage';
@@ -76,6 +77,7 @@ export function App() {
       <Route path="/pagar/:token" element={<PayPage />} />
       <Route path="/assinar" element={<SignupPage />} />
       <Route path="/termos" element={<TermsPage />} />
+      <Route path="/criar-conta" element={<CreateAccountPage />} />
       <Route path="/privacidade" element={<PrivacyPage />} />
       <Route path="/assinar/concluido" element={<SignupDonePage />} />
       <Route

@@ -535,9 +535,10 @@ export function CopyButton({ text, label = 'Copiar' }: { text: string; label?: s
 }
 
 /** Link sensível (convite / redefinição) exibido somente a quem o gerou. */
-export function SecretLink({ link, hours, kind = 'convite' }: { link: string; hours?: number; kind?: 'convite' | 'redefinição' }) {
+export function SecretLink({ link, hours, kind = 'convite', mailError }: { link: string; hours?: number; kind?: 'convite' | 'redefinição'; mailError?: string }) {
   return (
     <div className="stack-sm">
+      {mailError && <Alert>O e-mail não foi enviado: {mailError}. Copie o link abaixo e mande para a pessoa.</Alert>}
       <Alert kind="warning">
         Envie este link de {kind} por um canal seguro (ex.: WhatsApp direto com a pessoa). Ele é de uso único
         {hours ? ` e vale por ${hours} horas` : ''}. Não será exibido novamente.

@@ -191,6 +191,8 @@ export interface InviteResult {
   id?: string;
   inviteLink?: string;
   inviteSent?: boolean;
+  /** O e-mail falhou: o link aparece para envio manual, com o motivo. */
+  mailError?: string;
   validHours?: number;
   resetLink?: string;
 }

@@ -374,3 +374,24 @@ describe('relato de erro de tela', () => {
     expect((await anon.post('/api/client-errors', { message: 'x', extra: 1 })).statusCode).toBe(422);
   });
 });
+
+describe('falha no envio de e-mail', () => {
+  it('criar organização não dá erro: devolve o link de convite e o motivo', async () => {
+    const original = ctx.mailer.send.bind(ctx.mailer);
+    ctx.mailer.send = async () => {
+      throw Object.assign(new Error('Invalid login'), { code: 'EAUTH' });
+    };
+    try {
+      const r = await platform.post('/api/platform/orgs', { name: 'Academia Sem Email', segment: 'academia', ownerName: 'Dono', ownerEmail: `semmail-${Date.now()}@example.test` });
+      expect(r.statusCode).toBe(201);
+      expect(r.json().inviteLink).toMatch(/\/convite#token=/);
+      expect(r.json().mailError).toMatch(/usuário ou a senha/);
+      const t = await platform.post('/api/platform/mail-test', { to: 'x@example.test' });
+      expect(t.statusCode).toBe(502);
+      expect(t.json().error.message).toMatch(/senha de app/);
+    } finally {
+      ctx.mailer.send = original;
+    }
+    expect((await platform.post('/api/platform/mail-test', { to: 'x@example.test' })).statusCode).toBe(200);
+  });
+});

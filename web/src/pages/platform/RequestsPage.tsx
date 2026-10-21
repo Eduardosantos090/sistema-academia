@@ -43,7 +43,7 @@ export function RequestsPage() {
     <div className="stack">
       <PageHeader title="Pedidos de acesso" subtitle="Empresas que pediram para usar o Venceu pelo site." />
       <Segmented label="Situação" value={status} onChange={setStatus} options={[{ id: 'novo', label: 'Novos' }, { id: 'aprovado', label: 'Aprovados' }, { id: 'recusado', label: 'Recusados' }]} />
-      {result?.inviteLink && <div className="card card-body"><SecretLink link={result.inviteLink} hours={result.validHours} /></div>}
+      {result?.inviteLink && <div className="card card-body"><SecretLink link={result.inviteLink} hours={result.validHours} mailError={result.mailError} /></div>}
       {result?.inviteSent && <Alert kind="success">Organização criada e convite enviado por e-mail.</Alert>}
       <div className="card">
         {list.isLoading ? <Loading /> : !list.data?.items.length ? <Empty title="Nenhum pedido" icon="inbox" /> : (
